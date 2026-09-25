@@ -29,9 +29,8 @@ This handbook covers everything from everyday graphical workflows and keyboard s
    - [Algorithm 4: Variance / Hybrid](#algorithm-4-variance--hybrid)
    - [Quadtree Control Parameters](#quadtree-control-parameters)
 4. [Geometric Tile Shapes](#4-geometric-tile-shapes)
-   - [Interlocking Jigsaw Puzzles](#interlocking-jigsaw-puzzles)
-   - [Hexagonal Honeycombs](#hexagonal-honeycombs)
-   - [Classic Rectangles](#classic-rectangles)
+   - [Uniform Rectangles](#uniform-rectangles)
+   - [Adaptive Quadtrees](#adaptive-quadtrees)
 5. [Advanced Perceptual Color & Matching Science](#5-advanced-perceptual-color--matching-science)
    - [Riemersma Spectral Color Metric](#riemersma-spectral-color-metric)
    - [Reinhard Statistical Color Transfer in OKLab Space](#reinhard-statistical-color-transfer-in-oklab-space)
@@ -121,11 +120,9 @@ Add folders containing photos that will serve as the constituent tiles:
 
 ### Step 3: Choosing Tile Shapes & Tessellations
 
-Select from four distinct tessellation models:
-1. **Rectangles / Squares**: Traditional uniform grid.
-2. **Hexagons**: Modern honeycomb lattice.
-3. **Jigsaw Puzzle**: Mathematically generated interlocking jigsaw pieces with Bezier tabs.
-4. **Adaptive Quadtree**: Dynamic multi-resolution tiling that places small tiles in detailed regions and large tiles in smooth regions.
+Select from two primary tessellation architectures:
+1. **Rectangles / Squares**: Traditional uniform grid with configurable across/down density.
+2. **Adaptive Quadtree**: Dynamic multi-resolution tiling that places small tiles in detailed regions and large tiles in homogeneous regions.
 
 ### Step 4: Color Matching & Perceptual Controls
 
@@ -252,20 +249,18 @@ $$\text{Detail} = (1 - \alpha) \cdot \frac{\|\nabla Y\|}{M_{\max}} + \alpha \cdo
 
 ## 4. Geometric Tile Shapes
 
-### Interlocking Jigsaw Puzzles
+### Uniform Rectangles
 
-Every puzzle piece is generated using parametric cubic Bezier curves:
-- **Tabs & Sockets**: Neighboring pieces share identical control points inverted across the shared boundary, ensuring 100% mathematical interlocking without gaps.
-- **Curviness Slider**: Modulates the waviness and tab displacement from `0.0` (classical straight-edged tabs) to `1.0` (wild, highly organic pieces).
-- **Die-Cut Cutlines**: Optional vector outlines rendered at export with sub-pixel anti-aliasing to simulate physical cardboard puzzle die-cuts.
+The classic photomosaic layout. Maximizes photo area and visual clarity with uniform tile dimensions across the canvas. Fully configurable in horizontal (`--across`) and vertical (`--down`) counts.
 
-### Hexagonal Honeycombs
+### Adaptive Quadtrees
 
-Tessellates the image using regular hexagonal geometry with staggered odd/even rows. Hexagons provide a modern, architectural appearance that softens the rigid rectangular grid of traditional mosaics.
-
-### Classic Rectangles
-
-The timeless photomosaic standard. Maximizes photo area and visual clarity without cropping corners.
+Dynamic multi-resolution hierarchical subdivision. Rather than applying a fixed uniform grid, the canvas is decomposed into quadtree quadrants according to mathematical homogeneity criteria:
+- **Julia Range Extrema**: Isolates local luminance extremes ($L_{\max} - L_{\min}$).
+- **RGB Chebyshev Range**: Evaluates multi-channel color divergence.
+- **SAT Local Variance**: Constant-time variance evaluation via Summed-Area Tables.
+- **Whole-Canvas vs. Grid-Seeded**: Supports global root subdivision or grid-cell multi-scale refinement.
+- **2:1 Balanced Neighbor Constraints**: Ensures harmonious visual transitions with no adjacent cell differing by more than one scale step.
 
 ---
 
@@ -320,7 +315,7 @@ sudo cp .build/release/mosaiclab-cli /usr/local/bin/
 | `--target` | `<path>` | *Required* | Path to target image (AVIF, HEIC, PNG, JPEG, TIFF, WebP). |
 | `--sources` | `<path>` | *Required* | Directory of source photos (recursively scanned). |
 | `--output` | `<path>` | `mosaic.png` | Destination file path for rendered mosaic. |
-| `--shape` | `rect` \| `hex` \| `puzzle` \| `quadtree` | `rect` | Tile geometry shape. |
+| `--shape` | `rect` \| `quadtree` | `rect` | Tile geometry shape. |
 | `--across` | `<int>` | `30` | Number of tiles horizontally (or base across for quadtree). |
 | `--down` | `<int>` | `20` | Number of tiles vertically (or base down for quadtree). |
 | `--quadtree-algo` | `whole` \| `julia` \| `color` \| `variance` | `julia` | Quadtree segmentation algorithm. |
@@ -329,15 +324,14 @@ sudo cp .build/release/mosaiclab-cli /usr/local/bin/
 | `--quadtree-min-tile`| `<pixels>` | `16` | Minimum tile dimension floor in pixels. |
 | `--quadtree-balance`| `true` \| `false` | `true` | Enforce 2:1 balanced transitions. |
 | `--quadtree-mode` | `edge` \| `balanced` \| `texture` | `balanced` | Detail weighting mode for variance algorithm. |
-| `--curviness` | `0.0` – `1.0` | `0.5` | Puzzle tab waviness. |
 | `--color-transfer`| `0.0` – `1.0` | `0.0` | Reinhard OKLab color transfer strength. |
 | `--edge-weight` | `0.0` – `1.0` | `0.0` | Edge-aware directional matching weight. |
 | `--max-reuse` | `<int>` | `0` | Max appearances per photo (`0` = unlimited, `1` = unique). |
 | `--min-distance` | `<int>` | `2` | Minimum grid distance between duplicate photos. |
 | `--metric` | `riemersma` \| `rgb` | `riemersma` | Perceptual or Euclidean color metric. |
 | `--width` | `<pixels>` | `2400` | Final mosaic render width in pixels. |
-| `--stroke` | `<pixels>` | `0.0` | Border cutline stroke width. |
-| `--stroke-color`| `black` \| `white` | `black` | Border cutline stroke color. |
+| `--stroke` | `<pixels>` | `0.0` | Border outline stroke width. |
+| `--stroke-color`| `black` \| `white` | `black` | Border outline stroke color. |
 | `--force` | *None* | *Off* | Bypass physical RAM safety guard. |
 
 ### Ready-to-Use Recipes
@@ -356,30 +350,30 @@ mosaiclab-cli \
   --output portrait_adaptive.png
 ```
 
-#### Museum-Grade Puzzle Poster (Print 6000px)
+#### High-Fidelity Edge-Aligned Uniform Grid (Print 6000px)
 ```bash
 mosaiclab-cli \
   --target landscape.jpg \
   --sources ~/Pictures/Nature \
-  --shape puzzle \
-  --across 50 \
-  --down 35 \
-  --curviness 0.6 \
-  --stroke 0.75 \
+  --shape rect \
+  --across 60 \
+  --down 40 \
+  --edge-weight 0.3 \
+  --color-transfer 0.2 \
   --width 6000 \
-  --output puzzle_print.png
+  --output landscape_print.png
 ```
 
-#### Unique "No Duplicates" Hexagonal Mosaic
+#### Unique "No Duplicates" Classic Mosaic
 ```bash
 mosaiclab-cli \
   --target artwork.png \
   --sources ~/Pictures/CameraRoll \
-  --shape hex \
+  --shape rect \
   --across 45 \
   --down 30 \
   --max-reuse 1 \
-  --output hex_unique.png
+  --output artwork_unique.png
 ```
 
 ---

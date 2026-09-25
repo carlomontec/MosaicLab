@@ -98,6 +98,7 @@ cat << 'EOF' > "$CONTENTS_DIR/Info.plist"
             <string>MosaicLab Project</string>
             <key>UTTypeConformsTo</key>
             <array>
+                <string>com.pkware.zip-archive</string>
                 <string>public.data</string>
                 <string>public.content</string>
             </array>

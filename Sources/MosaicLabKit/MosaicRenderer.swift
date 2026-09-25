@@ -171,4 +171,95 @@ public final class MosaicRenderer {
             throw NSError(domain: "MosaicRenderer", code: 4, userInfo: [NSLocalizedDescriptionKey: "Failed to write image to \(outputURL.path)"])
         }
     }
+    
+    /// Quickly renders a preview mosaic into an in-memory CGImage (e.g. for QuickLook or UI previews).
+    public func renderToImage(
+        tiles: [MosaicTile],
+        mosaicSize: CGSize,
+        outputWidth: Int = 1280,
+        strokeWidth: Float = 0.0,
+        strokeColor: String = "black",
+        colorTransferStrength: Float = 0.0,
+        isMonochrome: Bool = false
+    ) -> CGImage? {
+        guard mosaicSize.width > 0, mosaicSize.height > 0 else { return nil }
+        let scale = CGFloat(outputWidth) / mosaicSize.width
+        let outputHeight = max(1, Int(mosaicSize.height * scale))
+        
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        let bytesPerRow = outputWidth * 4
+        let bitmapInfo = CGBitmapInfo.byteOrder32Big.rawValue | CGImageAlphaInfo.premultipliedLast.rawValue
+        
+        guard let context = CGContext(
+            data: nil,
+            width: outputWidth,
+            height: outputHeight,
+            bitsPerComponent: 8,
+            bytesPerRow: bytesPerRow,
+            space: colorSpace,
+            bitmapInfo: bitmapInfo
+        ) else {
+            return nil
+        }
+        
+        context.interpolationQuality = .high
+        context.setFillColor(CGColor(red: 0, green: 0, blue: 0, alpha: 1.0))
+        context.fill(CGRect(x: 0, y: 0, width: outputWidth, height: outputHeight))
+        
+        context.saveGState()
+        context.translateBy(x: 0, y: CGFloat(outputHeight))
+        context.scaleBy(x: scale, y: -scale)
+        
+        let transferStrength = colorTransferStrength
+        let strokeW = CGFloat(strokeWidth)
+        let strokeLineWidth = (scale > 0.0) ? strokeW / scale : strokeW
+        
+        for tile in tiles {
+            context.saveGState()
+            context.addPath(tile.geometry.outline)
+            context.clip()
+            
+            if let imageURL = tile.bestImageURL {
+                let bounds = tile.geometry.bounds
+                let targetStats = (transferStrength > 0.001) ? tile.targetColorStatistics : nil
+                if let cgImg = MosaicThumbnailCache.shared.thumbnail(
+                    for: imageURL,
+                    targetStats: targetStats,
+                    colorTransferStrength: transferStrength,
+                    isMonochrome: isMonochrome,
+                    maxPixelSize: 128
+                ) {
+                    let imgW = CGFloat(cgImg.width)
+                    let imgH = CGFloat(cgImg.height)
+                    let fillScale = max(bounds.width / imgW, bounds.height / imgH)
+                    let drawW = imgW * fillScale
+                    let drawH = imgH * fillScale
+                    let drawX = bounds.midX - drawW / 2.0
+                    let drawY = bounds.midY - drawH / 2.0
+                    
+                    context.saveGState()
+                    context.translateBy(x: drawX, y: drawY + drawH)
+                    context.scaleBy(x: 1.0, y: -1.0)
+                    context.draw(cgImg, in: CGRect(x: 0, y: 0, width: drawW, height: drawH))
+                    context.restoreGState()
+                }
+            }
+            context.restoreGState()
+            
+            if strokeW > 0.01 {
+                context.saveGState()
+                let strokeCol = (strokeColor == "white") ?
+                    CGColor(red: 1, green: 1, blue: 1, alpha: 0.6) :
+                    CGColor(red: 0, green: 0, blue: 0, alpha: 0.35)
+                context.setStrokeColor(strokeCol)
+                context.setLineWidth(strokeLineWidth)
+                context.addPath(tile.geometry.outline)
+                context.strokePath()
+                context.restoreGState()
+            }
+        }
+        
+        context.restoreGState()
+        return context.makeImage()
+    }
 }

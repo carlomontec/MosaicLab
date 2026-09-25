@@ -3,9 +3,7 @@ import CoreGraphics
 
 public enum MosaicShapeType: Int, Codable, CaseIterable, Sendable {
     case rectangular = 0
-    case hexagonal = 1
-    case puzzle = 2
-    case quadtree = 3
+    case quadtree = 1
 }
 
 public typealias ShapeType = MosaicShapeType
@@ -36,113 +34,6 @@ public final class MosaicTileGeometry: @unchecked Sendable {
 }
 
 public typealias TileGeometry = MosaicTileGeometry
-
-private enum PuzzleTabType: Int {
-    case noTab = 0
-    case inwards = -1
-    case outwards = 1
-}
-
-private func createPuzzlePiecePath(
-    tileBounds: CGRect,
-    topTab: PuzzleTabType,
-    leftTab: PuzzleTabType,
-    rightTab: PuzzleTabType,
-    bottomTab: PuzzleTabType,
-    topLeftHCurve: Float, topLeftVCurve: Float,
-    topRightHCurve: Float, topRightVCurve: Float,
-    bottomLeftHCurve: Float, bottomLeftVCurve: Float,
-    bottomRightHCurve: Float, bottomRightVCurve: Float
-) -> CGPath {
-    let path = CGMutablePath()
-    let xSize = CGFloat(tileBounds.size.width)
-    let ySize = CGFloat(tileBounds.size.height)
-    let tabSize = CGFloat(min(xSize, ySize) / 3.0)
-    
-    let cTopLeftH = CGFloat(topLeftHCurve) * tabSize * 0.25
-    let cTopLeftV = CGFloat(topLeftVCurve) * tabSize * 0.25
-    let cTopRightH = CGFloat(topRightHCurve) * tabSize * 0.25
-    let cTopRightV = CGFloat(topRightVCurve) * tabSize * 0.25
-    let cBottomLeftH = CGFloat(bottomLeftHCurve) * tabSize * 0.25
-    let cBottomLeftV = CGFloat(bottomLeftVCurve) * tabSize * 0.25
-    let cBottomRightH = CGFloat(bottomRightHCurve) * tabSize * 0.25
-    let cBottomRightV = CGFloat(bottomRightVCurve) * tabSize * 0.25
-    
-    path.move(to: CGPoint(x: 0, y: 0))
-    
-    // Bottom edge
-    if bottomTab == .noTab {
-        path.addCurve(
-            to: CGPoint(x: xSize, y: 0),
-            control1: CGPoint(x: xSize / 3.0, y: tabSize * CGFloat(bottomLeftHCurve)),
-            control2: CGPoint(x: xSize * 2.0 / 3.0, y: tabSize * CGFloat(bottomRightHCurve))
-        )
-    } else {
-        let orient: CGFloat = (bottomTab == .inwards) ? 1.0 : -1.0
-        path.addCurve(to: CGPoint(x: xSize / 4.0, y: 0), control1: CGPoint(x: xSize / 12.0, y: cBottomLeftH), control2: CGPoint(x: xSize / 6.0, y: cBottomLeftH))
-        path.addCurve(to: CGPoint(x: xSize * 5.0 / 12.0, y: tabSize / 2.0 * orient), control1: CGPoint(x: xSize / 3.0, y: -cBottomLeftH), control2: CGPoint(x: xSize / 2.0, y: tabSize / 4.0 * orient))
-        path.addCurve(to: CGPoint(x: xSize / 2.0, y: tabSize * orient), control1: CGPoint(x: xSize / 3.0, y: tabSize * 0.75 * orient), control2: CGPoint(x: xSize * 3.0 / 8.0, y: tabSize * orient))
-        path.addCurve(to: CGPoint(x: xSize * 7.0 / 12.0, y: tabSize / 2.0 * orient), control1: CGPoint(x: xSize * 15.0 / 24.0, y: tabSize * orient), control2: CGPoint(x: xSize * 2.0 / 3.0, y: tabSize * 0.75 * orient))
-        path.addCurve(to: CGPoint(x: xSize * 3.0 / 4.0, y: 0), control1: CGPoint(x: xSize / 2.0, y: tabSize / 4.0 * orient), control2: CGPoint(x: xSize * 2.0 / 3.0, y: -cBottomRightH))
-        path.addCurve(to: CGPoint(x: xSize, y: 0), control1: CGPoint(x: xSize * 10.0 / 12.0, y: cBottomRightH), control2: CGPoint(x: xSize * 11.0 / 12.0, y: cBottomRightH))
-    }
-    
-    // Right edge
-    if rightTab == .noTab {
-        path.addCurve(
-            to: CGPoint(x: xSize, y: ySize),
-            control1: CGPoint(x: xSize + tabSize * CGFloat(bottomRightVCurve), y: ySize / 3.0),
-            control2: CGPoint(x: xSize + tabSize * CGFloat(topRightVCurve), y: ySize * 2.0 / 3.0)
-        )
-    } else {
-        let orient: CGFloat = (rightTab == .inwards) ? -1.0 : 1.0
-        path.addCurve(to: CGPoint(x: xSize, y: ySize / 4.0), control1: CGPoint(x: xSize + cBottomRightV, y: ySize / 12.0), control2: CGPoint(x: xSize + cBottomRightV, y: ySize / 6.0))
-        path.addCurve(to: CGPoint(x: xSize + tabSize / 2.0 * orient, y: ySize * 5.0 / 12.0), control1: CGPoint(x: xSize - cBottomRightV, y: ySize / 3.0), control2: CGPoint(x: xSize + tabSize / 4.0 * orient, y: ySize / 2.0))
-        path.addCurve(to: CGPoint(x: xSize + tabSize * orient, y: ySize / 2.0), control1: CGPoint(x: xSize + tabSize * 0.75 * orient, y: ySize / 3.0), control2: CGPoint(x: xSize + tabSize * orient, y: ySize * 3.0 / 8.0))
-        path.addCurve(to: CGPoint(x: xSize + tabSize / 2.0 * orient, y: ySize * 7.0 / 12.0), control1: CGPoint(x: xSize + tabSize * orient, y: ySize * 15.0 / 24.0), control2: CGPoint(x: xSize + tabSize * 0.75 * orient, y: ySize * 2.0 / 3.0))
-        path.addCurve(to: CGPoint(x: xSize, y: ySize * 3.0 / 4.0), control1: CGPoint(x: xSize + tabSize / 4.0 * orient, y: ySize / 2.0), control2: CGPoint(x: xSize - cTopRightV, y: ySize * 2.0 / 3.0))
-        path.addCurve(to: CGPoint(x: xSize, y: ySize), control1: CGPoint(x: xSize + cTopRightV, y: ySize * 10.0 / 12.0), control2: CGPoint(x: xSize + cTopRightV, y: ySize * 11.0 / 12.0))
-    }
-    
-    // Top edge
-    if topTab == .noTab {
-        path.addCurve(
-            to: CGPoint(x: 0, y: ySize),
-            control1: CGPoint(x: xSize * 2.0 / 3.0, y: ySize + tabSize * CGFloat(topRightHCurve)),
-            control2: CGPoint(x: xSize / 3.0, y: ySize + tabSize * CGFloat(topLeftHCurve))
-        )
-    } else {
-        let orient: CGFloat = (topTab == .inwards) ? -1.0 : 1.0
-        path.addCurve(to: CGPoint(x: xSize * 3.0 / 4.0, y: ySize), control1: CGPoint(x: xSize * 11.0 / 12.0, y: ySize + cTopRightH), control2: CGPoint(x: xSize * 10.0 / 12.0, y: ySize + cTopRightH))
-        path.addCurve(to: CGPoint(x: xSize / 2.0, y: ySize + tabSize / 2.0 * orient), control1: CGPoint(x: xSize * 2.0 / 3.0, y: ySize - cTopRightH), control2: CGPoint(x: xSize / 2.0, y: ySize + tabSize / 4.0 * orient))
-        path.addCurve(to: CGPoint(x: xSize * 3.0 / 8.0, y: ySize + tabSize * orient), control1: CGPoint(x: xSize * 2.0 / 3.0, y: ySize + tabSize * 0.75 * orient), control2: CGPoint(x: xSize * 15.0 / 24.0, y: ySize + tabSize * orient))
-        path.addCurve(to: CGPoint(x: xSize * 5.0 / 12.0, y: ySize + tabSize / 2.0 * orient), control1: CGPoint(x: xSize * 3.0 / 8.0, y: ySize + tabSize * orient), control2: CGPoint(x: xSize / 3.0, y: ySize + tabSize * 0.75 * orient))
-        path.addCurve(to: CGPoint(x: xSize / 4.0, y: ySize), control1: CGPoint(x: xSize / 2.0, y: ySize + tabSize / 4.0 * orient), control2: CGPoint(x: xSize / 3.0, y: ySize - cTopLeftH))
-        path.addCurve(to: CGPoint(x: 0, y: ySize), control1: CGPoint(x: xSize / 6.0, y: ySize + cTopLeftH), control2: CGPoint(x: xSize / 12.0, y: ySize + cTopLeftH))
-    }
-    
-    // Left edge
-    if leftTab == .noTab {
-        path.addCurve(
-            to: CGPoint(x: 0, y: 0),
-            control1: CGPoint(x: tabSize * CGFloat(topLeftVCurve), y: ySize * 2.0 / 3.0),
-            control2: CGPoint(x: tabSize * CGFloat(bottomLeftVCurve), y: ySize / 3.0)
-        )
-    } else {
-        let orient: CGFloat = (leftTab == .inwards) ? 1.0 : -1.0
-        path.addCurve(to: CGPoint(x: 0, y: ySize * 3.0 / 4.0), control1: CGPoint(x: cTopLeftV, y: ySize * 11.0 / 12.0), control2: CGPoint(x: cTopLeftV, y: ySize * 10.0 / 12.0))
-        path.addCurve(to: CGPoint(x: tabSize / 2.0 * orient, y: ySize * 7.0 / 12.0), control1: CGPoint(x: -cTopLeftV, y: ySize * 2.0 / 3.0), control2: CGPoint(x: tabSize / 4.0 * orient, y: ySize / 2.0))
-        path.addCurve(to: CGPoint(x: tabSize * orient, y: ySize / 2.0), control1: CGPoint(x: tabSize * 0.75 * orient, y: ySize * 2.0 / 3.0), control2: CGPoint(x: tabSize * orient, y: ySize * 15.0 / 24.0))
-        path.addCurve(to: CGPoint(x: tabSize / 2.0 * orient, y: ySize * 5.0 / 12.0), control1: CGPoint(x: tabSize * orient, y: ySize * 3.0 / 8.0), control2: CGPoint(x: tabSize * 0.75 * orient, y: ySize / 3.0))
-        path.addCurve(to: CGPoint(x: 0, y: ySize / 4.0), control1: CGPoint(x: tabSize / 4.0 * orient, y: ySize / 2.0), control2: CGPoint(x: -cBottomLeftV, y: ySize / 3.0))
-        path.addCurve(to: CGPoint(x: 0, y: 0), control1: CGPoint(x: cBottomLeftV, y: ySize / 6.0), control2: CGPoint(x: cBottomLeftV, y: ySize / 12.0))
-    }
-    
-    path.closeSubpath()
-    
-    var transform = CGAffineTransform(translationX: tileBounds.origin.x, y: tileBounds.origin.y)
-    return path.copy(using: &transform) ?? path
-}
 
 // MARK: - Integral Image for Fast Quadtree Variance & Gradients
 
@@ -606,9 +497,7 @@ public final class MosaicShapes: @unchecked Sendable {
         for type: MosaicShapeType,
         mosaicSize: CGSize,
         across: Int,
-        down: Int,
-        curviness: Float,
-        tabRatio: Float
+        down: Int
     ) -> [MosaicTileGeometry] {
         return generateShapes(
             for: type,
@@ -616,8 +505,6 @@ public final class MosaicShapes: @unchecked Sendable {
             mosaicSize: mosaicSize,
             across: across,
             down: down,
-            curviness: curviness,
-            tabRatio: tabRatio,
             maxDepth: 3,
             detailThreshold: 0.15,
             balanced: true,
@@ -633,101 +520,12 @@ public final class MosaicShapes: @unchecked Sendable {
         mosaicSize: CGSize,
         across: Int,
         down: Int,
-        curviness: Float,
-        tabRatio: Float,
-        maxDepth: Int,
-        detailThreshold: Float
-    ) -> [MosaicTileGeometry] {
-        return generateShapes(
-            for: type,
-            targetImage: targetImage,
-            mosaicSize: mosaicSize,
-            across: across,
-            down: down,
-            curviness: curviness,
-            tabRatio: tabRatio,
-            maxDepth: maxDepth,
-            detailThreshold: detailThreshold,
-            balanced: true,
-            detailAlpha: 0.5,
-            algorithm: .juliaRange,
-            minTileDim: 16.0
-        )
-    }
-    
-    public static func generateShapes(
-        for type: MosaicShapeType,
-        targetImage: CGImage?,
-        mosaicSize: CGSize,
-        across: Int,
-        down: Int,
-        curviness: Float,
-        tabRatio: Float,
-        maxDepth: Int,
-        detailThreshold: Float,
-        balanced: Bool
-    ) -> [MosaicTileGeometry] {
-        return generateShapes(
-            for: type,
-            targetImage: targetImage,
-            mosaicSize: mosaicSize,
-            across: across,
-            down: down,
-            curviness: curviness,
-            tabRatio: tabRatio,
-            maxDepth: maxDepth,
-            detailThreshold: detailThreshold,
-            balanced: balanced,
-            detailAlpha: 0.5,
-            algorithm: .juliaRange,
-            minTileDim: 16.0
-        )
-    }
-    
-    public static func generateShapes(
-        for type: MosaicShapeType,
-        targetImage: CGImage?,
-        mosaicSize: CGSize,
-        across: Int,
-        down: Int,
-        curviness: Float,
-        tabRatio: Float,
-        maxDepth: Int,
-        detailThreshold: Float,
-        balanced: Bool,
-        detailAlpha: Float
-    ) -> [MosaicTileGeometry] {
-        return generateShapes(
-            for: type,
-            targetImage: targetImage,
-            mosaicSize: mosaicSize,
-            across: across,
-            down: down,
-            curviness: curviness,
-            tabRatio: tabRatio,
-            maxDepth: maxDepth,
-            detailThreshold: detailThreshold,
-            balanced: balanced,
-            detailAlpha: detailAlpha,
-            algorithm: .juliaRange,
-            minTileDim: 16.0
-        )
-    }
-    
-    public static func generateShapes(
-        for type: MosaicShapeType,
-        targetImage: CGImage?,
-        mosaicSize: CGSize,
-        across: Int,
-        down: Int,
-        curviness: Float,
-        tabRatio: Float,
-        maxDepth: Int,
-        detailThreshold: Float,
-        balanced: Bool,
-        detailAlpha: Float,
-        algorithm: MosaicQuadtreeAlgorithm,
-        minTileDim: Float
+        maxDepth: Int = 3,
+        detailThreshold: Float = 0.15,
+        balanced: Bool = true,
+        detailAlpha: Float = 0.5,
+        algorithm: MosaicQuadtreeAlgorithm = .juliaRange,
+        minTileDim: Float = 16.0
     ) -> [MosaicTileGeometry] {
         let xCount = across > 0 ? across : 30
         let yCount = down > 0 ? down : 20
@@ -820,106 +618,6 @@ public final class MosaicShapes: @unchecked Sendable {
                 let geom = MosaicTileGeometry(index: tileIndex, gridX: gx, gridY: gy, bounds: rect, outline: rectPath)
                 tileIndex += 1
                 results.append(geom)
-            }
-            
-        case .hexagonal:
-            let xSize = mosaicSize.width / (CGFloat(xCount) - (1.0 / 3.0))
-            let ySize = mosaicSize.height / CGFloat(yCount)
-            var index = 0
-            
-            func clampX(_ v: CGFloat) -> CGFloat { min(max(v, 0.0), mosaicSize.width) }
-            func clampY(_ v: CGFloat) -> CGFloat { min(max(v, 0.0), mosaicSize.height) }
-            
-            for x in 0..<xCount {
-                let currentYCount = (x % 2 == 0) ? yCount : (yCount + 1)
-                for y in 0..<currentYCount {
-                    let originX = xSize * (CGFloat(x) - (1.0 / 3.0))
-                    let originY = ySize * ((x % 2 == 0) ? CGFloat(y) : (CGFloat(y) - 0.5))
-                    
-                    let hexPath = CGMutablePath()
-                    hexPath.move(to: CGPoint(x: clampX(originX + xSize / 3.0), y: clampY(originY)))
-                    hexPath.addLine(to: CGPoint(x: clampX(originX + xSize), y: clampY(originY)))
-                    hexPath.addLine(to: CGPoint(x: clampX(originX + xSize * 4.0 / 3.0), y: clampY(originY + ySize / 2.0)))
-                    hexPath.addLine(to: CGPoint(x: clampX(originX + xSize), y: clampY(originY + ySize)))
-                    hexPath.addLine(to: CGPoint(x: clampX(originX + xSize / 3.0), y: clampY(originY + ySize)))
-                    hexPath.addLine(to: CGPoint(x: clampX(originX), y: clampY(originY + ySize / 2.0)))
-                    hexPath.closeSubpath()
-                    
-                    let bounds = hexPath.boundingBox
-                    let geom = MosaicTileGeometry(index: index, gridX: x, gridY: y, bounds: bounds, outline: hexPath)
-                    index += 1
-                    results.append(geom)
-                }
-            }
-            
-        case .puzzle:
-            // Tab directions matrix
-            let totalSepX = xCount * 2 + 1
-            var tabTypes = [[PuzzleTabType]](repeating: [PuzzleTabType](repeating: .noTab, count: yCount), count: totalSepX)
-            for x in 0..<totalSepX {
-                for y in 0..<yCount {
-                    if Int.random(in: 0..<100) >= Int(tabRatio * 100.0) {
-                        tabTypes[x][y] = .noTab
-                    } else {
-                        tabTypes[x][y] = (Int.random(in: 0...1) == 0) ? .inwards : .outwards
-                    }
-                }
-            }
-            
-            // Curviness matrices
-            var hCurviness = [[Float]](repeating: [Float](repeating: 0, count: yCount + 1), count: xCount + 1)
-            var vCurviness = [[Float]](repeating: [Float](repeating: 0, count: yCount + 1), count: xCount + 1)
-            for x in 0...xCount {
-                for y in 0...yCount {
-                    let randH = Float(Int.random(in: -100...99)) / 100.0
-                    let randV = Float(Int.random(in: -100...99)) / 100.0
-                    hCurviness[x][y] = (y == 0 || y == yCount) ? 0.0 : randH * curviness
-                    vCurviness[x][y] = (x == 0 || x == xCount) ? 0.0 : randV * curviness
-                }
-            }
-            
-            let xSize = mosaicSize.width / CGFloat(xCount)
-            let ySize = mosaicSize.height / CGFloat(yCount)
-            var index = 0
-            
-            func invertTab(_ tab: PuzzleTabType) -> PuzzleTabType {
-                switch tab {
-                case .noTab: return .noTab
-                case .inwards: return .outwards
-                case .outwards: return .inwards
-                }
-            }
-            
-            for y in 0..<yCount {
-                for x in 0..<xCount {
-                    let tileBounds = CGRect(x: CGFloat(x) * xSize, y: CGFloat(y) * ySize, width: xSize, height: ySize)
-                    
-                    let topTab: PuzzleTabType = (y == yCount - 1) ? .noTab : tabTypes[x * 2][y]
-                    let leftTab: PuzzleTabType = (x == 0) ? .noTab : tabTypes[x * 2 - 1][y]
-                    let rightTab: PuzzleTabType = (x == xCount - 1) ? .noTab : invertTab(tabTypes[x * 2 + 1][y])
-                    let bottomTab: PuzzleTabType = (y == 0) ? .noTab : invertTab(tabTypes[x * 2][y - 1])
-                    
-                    let piecePath = createPuzzlePiecePath(
-                        tileBounds: tileBounds,
-                        topTab: topTab,
-                        leftTab: leftTab,
-                        rightTab: rightTab,
-                        bottomTab: bottomTab,
-                        topLeftHCurve: hCurviness[x][y + 1],
-                        topLeftVCurve: -vCurviness[x][y + 1],
-                        topRightHCurve: -hCurviness[x + 1][y + 1],
-                        topRightVCurve: -vCurviness[x + 1][y + 1],
-                        bottomLeftHCurve: hCurviness[x][y],
-                        bottomLeftVCurve: vCurviness[x][y],
-                        bottomRightHCurve: -hCurviness[x + 1][y],
-                        bottomRightVCurve: vCurviness[x + 1][y]
-                    )
-                    
-                    let bounds = piecePath.boundingBox
-                    let geom = MosaicTileGeometry(index: index, gridX: x, gridY: y, bounds: bounds, outline: piecePath)
-                    index += 1
-                    results.append(geom)
-                }
             }
         }
         

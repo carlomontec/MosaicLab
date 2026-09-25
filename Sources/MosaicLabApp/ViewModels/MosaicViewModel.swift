@@ -30,6 +30,7 @@ public final class MosaicViewModel: ObservableObject {
     // MARK: - Settings State
     @Published public var shapeType: MosaicShapeType = .rectangular {
         didSet {
+            guard !isLoadingProject else { return }
             if shapeType != oldValue {
                 if shapeType == .quadtree && tilesAcross > 20 {
                     tilesAcross = 12
@@ -44,13 +45,16 @@ public final class MosaicViewModel: ObservableObject {
         }
     }
     @Published public var tilesAcross: Int = 30 {
-        didSet { if tilesAcross != oldValue { prepareTiles() } }
+        didSet {
+            guard !isLoadingProject else { return }
+            if tilesAcross != oldValue { prepareTiles() }
+        }
     }
     @Published public var tilesDown: Int = 20 {
-        didSet { if tilesDown != oldValue { prepareTiles() } }
-    }
-    @Published public var curviness: Double = 0.5 {
-        didSet { if curviness != oldValue { prepareTiles() } }
+        didSet {
+            guard !isLoadingProject else { return }
+            if tilesDown != oldValue { prepareTiles() }
+        }
     }
     @Published public var strokeWidth: Double = 0.5 {
         didSet { canvasVersion += 1 }
@@ -61,7 +65,10 @@ public final class MosaicViewModel: ObservableObject {
     @Published public var maxReuse: Int = 0
     @Published public var minDistance: Int = 2
     @Published public var colorMetric: MosaicColorMetric = .riemersma {
-        didSet { canvasVersion += 1 }
+        didSet {
+            engine?.metric = colorMetric
+            canvasVersion += 1
+        }
     }
     
     // Blend with Original (0.0 = 100% Mosaic, 1.0 = 100% Original Photo)
@@ -81,22 +88,40 @@ public final class MosaicViewModel: ObservableObject {
     
     // Adaptive Multi-Resolution Quadtree Tiling
     @Published public var quadtreeMaxDepth: Int = 3 {
-        didSet { if quadtreeMaxDepth != oldValue && shapeType == .quadtree { prepareTiles() } }
+        didSet {
+            guard !isLoadingProject else { return }
+            if quadtreeMaxDepth != oldValue && shapeType == .quadtree { prepareTiles() }
+        }
     }
     @Published public var quadtreeThreshold: Double = 0.08 {
-        didSet { if quadtreeThreshold != oldValue && shapeType == .quadtree { prepareTiles() } }
+        didSet {
+            guard !isLoadingProject else { return }
+            if quadtreeThreshold != oldValue && shapeType == .quadtree { prepareTiles() }
+        }
     }
     @Published public var quadtreeBalanced: Bool = true {
-        didSet { if quadtreeBalanced != oldValue && shapeType == .quadtree { prepareTiles() } }
+        didSet {
+            guard !isLoadingProject else { return }
+            if quadtreeBalanced != oldValue && shapeType == .quadtree { prepareTiles() }
+        }
     }
     @Published public var quadtreeDetailAlpha: Double = 0.5 {
-        didSet { if quadtreeDetailAlpha != oldValue && shapeType == .quadtree { prepareTiles() } }
+        didSet {
+            guard !isLoadingProject else { return }
+            if quadtreeDetailAlpha != oldValue && shapeType == .quadtree { prepareTiles() }
+        }
     }
     @Published public var quadtreeAlgorithm: String = "juliaRange" {
-        didSet { if quadtreeAlgorithm != oldValue && shapeType == .quadtree { prepareTiles() } }
+        didSet {
+            guard !isLoadingProject else { return }
+            if quadtreeAlgorithm != oldValue && shapeType == .quadtree { prepareTiles() }
+        }
     }
     @Published public var quadtreeMinTileDim: Double = 16.0 {
-        didSet { if quadtreeMinTileDim != oldValue && shapeType == .quadtree { prepareTiles() } }
+        didSet {
+            guard !isLoadingProject else { return }
+            if quadtreeMinTileDim != oldValue && shapeType == .quadtree { prepareTiles() }
+        }
     }
     @Published public var showingQuadtreeInfo: Bool = false
     @Published public var quadtreeSizeSummary: String = ""
@@ -167,6 +192,15 @@ public final class MosaicViewModel: ObservableObject {
     @Published public var isExportSheetPresented: Bool = false
     @Published public var isAboutPresented: Bool = false
     
+    // Layout Change Warning & Confirmation
+    @Published public var showingLayoutChangeWarning: Bool = false
+    @Published public var pendingLayoutDescription: String = ""
+    public var pendingLayoutAction: (() -> Void)?
+    
+    // Project Disk Safety
+    @Published public var hasDiscardedMatchesFromSavedFile: Bool = false
+    @Published public var showingOverwriteSavedWarning: Bool = false
+    
     // Memory Estimation
     @Published public var estimatedRAMText: String = "0 MB"
     @Published public var isMemorySafe: Bool = true
@@ -188,10 +222,24 @@ public final class MosaicViewModel: ObservableObject {
     @Published public var exportFormat: String = "HEIC"
     @Published public var isExporting: Bool = false
     @Published public var exportErrorMessage: String?
+    @Published public var isLoadingProject: Bool = false
+    @Published public var loadingProjectName: String = ""
+    @Published public var projectLoadingLogs: [String] = []
+    @Published public var projectLoadingProgress: Double = 0.0
     
     private var matchingTask: Task<Void, Never>?
     private var tilePrepTask: Task<Void, Never>?
+    private var sourcesScanTask: Task<Void, Never>?
     private let loader = ImageLoader()
+    
+    @MainActor
+    public func appendLoadingLog(_ message: String, progress: Double? = nil) {
+        projectLoadingLogs.append(message)
+        if let progress = progress {
+            projectLoadingProgress = progress
+        }
+        statusMessage = message
+    }
     
     public init() {
         self.photosAuthStatus = ApplePhotosSource.authorizationStatus()
@@ -210,6 +258,7 @@ public final class MosaicViewModel: ObservableObject {
     
     // MARK: - Target Image Handling
     public func setTargetImage(from url: URL) {
+        guard !isExporting else { return }
         self.statusMessage = "Loading \(url.lastPathComponent)..."
         
         Task.detached(priority: .userInitiated) { [weak self] in
@@ -273,7 +322,7 @@ public final class MosaicViewModel: ObservableObject {
     
     // MARK: - Tile Preparation
     public func prepareTiles() {
-        guard let cgImg = targetCGImage else { return }
+        guard !isExporting, !isLoadingProject, let cgImg = targetCGImage else { return }
         
         tilePrepTask?.cancel()
         self.tileExcludedIdentifiers.removeAll()
@@ -281,7 +330,6 @@ public final class MosaicViewModel: ObservableObject {
         let shape = self.shapeType
         let across = self.tilesAcross
         let down = self.tilesDown
-        let curv = Float(self.curviness)
         let reuse = self.maxReuse
         let minDist = self.minDistance
         let metric = self.colorMetric
@@ -305,7 +353,6 @@ public final class MosaicViewModel: ObservableObject {
                 shapeType: shape,
                 tilesAcross: across,
                 tilesDown: down,
-                curviness: curv,
                 maxReuse: reuse,
                 minDistance: minDist,
                 metric: metric,
@@ -367,25 +414,37 @@ public final class MosaicViewModel: ObservableObject {
     }
     
     public func rescanSources() {
-        var allItems: [MosaicCandidateItem] = []
-        for folder in sourceFolders {
-            let found = loader.findImages(in: folder)
-            for url in found {
-                allItems.append(MosaicCandidateItem(
-                    id: url.path,
-                    displayName: url.lastPathComponent,
-                    sourceProviderID: "local",
-                    originalURL: url
-                ))
+        sourcesScanTask?.cancel()
+        let folders = self.sourceFolders
+        sourcesScanTask = Task.detached(priority: .utility) { [weak self, folders] in
+            var allItems: [MosaicCandidateItem] = []
+            let localLoader = ImageLoader()
+            for folder in folders {
+                if Task.isCancelled { return }
+                let found = localLoader.findImages(in: folder)
+                for url in found {
+                    allItems.append(MosaicCandidateItem(
+                        id: url.path,
+                        displayName: url.lastPathComponent,
+                        sourceProviderID: "local",
+                        originalURL: url
+                    ))
+                }
+            }
+            if Task.isCancelled { return }
+            let finalItems = allItems
+            let countHeic = finalItems.filter { 
+                let ext = ($0.originalURL?.pathExtension ?? "").lowercased()
+                return ext == "heic" || ext == "heif" || ext == "hif"
+            }.count
+            
+            await MainActor.run { [weak self, finalItems] in
+                guard let self = self else { return }
+                self.localCandidateItems = finalItems
+                self.heicCount = countHeic
+                self.recomputeCombinedCandidates()
             }
         }
-        self.localCandidateItems = allItems
-        self.heicCount = allItems.filter { 
-            let ext = ($0.originalURL?.pathExtension ?? "").lowercased()
-            return ext == "heic" || ext == "heif" || ext == "hif"
-        }.count
-        
-        recomputeCombinedCandidates()
     }
     
     public func recomputeCombinedCandidates() {
@@ -524,6 +583,7 @@ public final class MosaicViewModel: ObservableObject {
     
     // MARK: - Matching Execution
     public func toggleMatching() {
+        guard !isExporting else { return }
         if isRunning {
             pauseMatching()
         } else {
@@ -532,7 +592,7 @@ public final class MosaicViewModel: ObservableObject {
     }
     
     public func startMatching() {
-        guard let engine = self.engine, !candidateItems.isEmpty else { return }
+        guard !isExporting, let engine = self.engine, !candidateItems.isEmpty else { return }
         
         self.isRunning = true
         self.isPaused = false
@@ -601,7 +661,7 @@ public final class MosaicViewModel: ObservableObject {
                     if updated {
                         anyChunkUpdated = true
                         // Pre-heat thumbnail cache in background for smooth rendering
-                        MosaicThumbnailCache.shared.preheatThumbnail(for: cand.url, maxPixelSize: 140)
+                        MosaicThumbnailCache.shared.preheatThumbnail(for: cand.url, maxPixelSize: 256)
                     }
                 }
                 
@@ -713,6 +773,10 @@ public final class MosaicViewModel: ObservableObject {
     
     // MARK: - Export
     public func presentSavePanelAndExport(outputWidth: Int, format: String) {
+        guard !isExporting else {
+            statusMessage = "Export already in progress."
+            return
+        }
         guard let engine = self.engine else { return }
         
         let panel = NSSavePanel()
@@ -784,12 +848,71 @@ public final class MosaicViewModel: ObservableObject {
         }
     }
     
+    // MARK: - Layout Change Confirmation & Project Safety
+    public func resetMatches() {
+        engine?.resetMatches()
+        matchedTilesCount = 0
+        processedImagesCount = 0
+        averageScore = 1.0
+        canvasVersion += 1
+        statusMessage = "Matches cleared. Ready to start matching."
+    }
+    
+    public func proposeLayoutChange(description: String, action: @escaping () -> Void) {
+        if matchedTilesCount == 0 {
+            action()
+        } else {
+            guard !showingLayoutChangeWarning else { return }
+            self.pendingLayoutDescription = description
+            self.pendingLayoutAction = action
+            self.showingLayoutChangeWarning = true
+        }
+    }
+    
+    public func confirmLayoutChange() {
+        showingLayoutChangeWarning = false
+        if currentProjectURL != nil {
+            hasDiscardedMatchesFromSavedFile = true
+        }
+        let action = pendingLayoutAction
+        pendingLayoutAction = nil
+        action?()
+        if matchedTilesCount > 0 {
+            resetMatches()
+        }
+    }
+    
+    public func cancelLayoutChange() {
+        showingLayoutChangeWarning = false
+        pendingLayoutAction = nil
+        canvasVersion += 1
+        objectWillChange.send()
+    }
+    
+    public func saveAsBeforeLayoutChange() {
+        showingLayoutChangeWarning = false
+        saveProjectAsPrompt { [weak self] saved in
+            guard let self = self else { return }
+            if saved {
+                self.confirmLayoutChange()
+            } else {
+                self.cancelLayoutChange()
+            }
+        }
+    }
+    
     // MARK: - Project Save & Open (.macosaix)
     @Published public var currentProjectURL: URL?
     
     public func newProject() {
+        guard !isExporting else {
+            statusMessage = "Cannot create new project while export is in progress."
+            return
+        }
         matchingTask?.cancel()
         tilePrepTask?.cancel()
+        sourcesScanTask?.cancel()
+        isLoadingProject = false
         isRunning = false
         isPaused = false
         engine = nil
@@ -804,6 +927,9 @@ public final class MosaicViewModel: ObservableObject {
         matchedTilesCount = 0
         totalTilesCount = 0
         currentProjectURL = nil
+        hasDiscardedMatchesFromSavedFile = false
+        showingOverwriteSavedWarning = false
+        showingLayoutChangeWarning = false
         zoomScale = 1.0
         panOffset = .zero
         dragBaseOffset = .zero
@@ -812,6 +938,14 @@ public final class MosaicViewModel: ObservableObject {
     }
     
     public func saveProject() {
+        guard !isExporting, !isLoadingProject else {
+            statusMessage = "Cannot save while export or loading is in progress."
+            return
+        }
+        if hasDiscardedMatchesFromSavedFile, let _ = currentProjectURL {
+            showingOverwriteSavedWarning = true
+            return
+        }
         if let currentURL = currentProjectURL {
             saveProject(to: currentURL)
         } else {
@@ -819,9 +953,15 @@ public final class MosaicViewModel: ObservableObject {
         }
     }
     
-    public func saveProjectAsPrompt() {
+    public func saveProjectAsPrompt(completion: ((Bool) -> Void)? = nil) {
+        guard !isExporting, !isLoadingProject else {
+            statusMessage = "Cannot save while export or loading is in progress."
+            completion?(false)
+            return
+        }
         guard targetCGImage != nil else {
             statusMessage = "Cannot save project: No target image loaded."
+            completion?(false)
             return
         }
         
@@ -844,20 +984,33 @@ public final class MosaicViewModel: ObservableObject {
             types.append(macosaixType)
         }
         panel.allowedContentTypes = types
+        panel.allowsOtherFileTypes = true
         panel.prompt = "Save Project"
         
         panel.begin { [weak self] response in
-            guard let self = self, response == .OK, let destinationURL = panel.url else { return }
+            guard let self = self else {
+                completion?(false)
+                return
+            }
+            guard response == .OK, let destinationURL = panel.url else {
+                completion?(false)
+                return
+            }
             var finalURL = destinationURL
             let ext = finalURL.pathExtension.lowercased()
             if ext != "mosaiclab" && ext != "macosaix" {
                 finalURL = finalURL.appendingPathExtension("mosaiclab")
             }
             self.saveProject(to: finalURL)
+            completion?(true)
         }
     }
     
     public func saveProject(to destinationURL: URL) {
+        guard !isExporting else {
+            statusMessage = "Cannot save while export is in progress."
+            return
+        }
         guard let engine = self.engine, let targetURL = self.targetImageURL else {
             statusMessage = "No active mosaic to save."
             return
@@ -865,10 +1018,8 @@ public final class MosaicViewModel: ObservableObject {
         
         let shapeStr: String
         switch shapeType {
-        case .hexagonal: shapeStr = "hexagonal"
-        case .puzzle: shapeStr = "puzzle"
         case .quadtree: shapeStr = "quadtree"
-        default: shapeStr = "rectangular"
+        case .rectangular: shapeStr = "rectangular"
         }
         
         let metricStr: String
@@ -882,7 +1033,7 @@ public final class MosaicViewModel: ObservableObject {
             shapeType: shapeStr,
             tilesAcross: tilesAcross,
             tilesDown: tilesDown,
-            curviness: Float(curviness),
+            curviness: nil,
             strokeWidth: strokeWidth,
             strokeColor: strokeColor,
             maxReuse: maxReuse,
@@ -899,17 +1050,52 @@ public final class MosaicViewModel: ObservableObject {
             quadtreeMinTileDim: quadtreeMinTileDim
         )
         
+        var uniqueThumbnails: [String: CGImage] = [:]
+        var pathToThumbFile: [String: String] = [:]
+        var thumbCounter = 0
+        
         var tileRecords: [MosaicLabProject.TileMatchRecord] = []
         tileRecords.reserveCapacity(engine.tiles.count)
         for (idx, tile) in engine.tiles.enumerated() {
+            var thumbFilename: String? = nil
+            if let imageURL = tile.bestImageURL {
+                let path = imageURL.path
+                if let existing = pathToThumbFile[path] {
+                    thumbFilename = existing
+                } else {
+                    let fn = String(format: "thumb_%05d.heic", thumbCounter)
+                    thumbCounter += 1
+                    pathToThumbFile[path] = fn
+                    thumbFilename = fn
+                    if let thumb = MosaicThumbnailCache.shared.thumbnail(for: imageURL, maxPixelSize: 256) {
+                        uniqueThumbnails[fn] = thumb
+                    }
+                }
+            }
             tileRecords.append(
                 MosaicLabProject.TileMatchRecord(
                     index: idx,
                     imagePath: tile.bestImageURL?.path,
-                    score: tile.bestScore
+                    score: tile.bestScore,
+                    thumbnailFile: thumbFilename
                 )
             )
         }
+        
+        let mosaicSize = CGSize(
+            width: targetCGImage?.width ?? 1280,
+            height: targetCGImage?.height ?? 960
+        )
+        let preview = MosaicRenderer().renderToImage(
+            tiles: engine.tiles,
+            mosaicSize: mosaicSize,
+            outputWidth: min(Int(mosaicSize.width), 1280),
+            strokeWidth: Float(strokeWidth),
+            strokeColor: strokeColor,
+            colorTransferStrength: Float(colorTransferStrength),
+            isMonochrome: (colorMetric == .monochrome)
+        )
+        let targetForEmbedding = targetCGImage
         
         let project = MosaicLabProject(
             version: "3.0.0",
@@ -922,10 +1108,18 @@ public final class MosaicViewModel: ObservableObject {
         
         Task.detached(priority: .userInitiated) { [weak self] in
             do {
-                try MosaicProjectManager.shared.saveProject(project, to: destinationURL)
+                try MosaicProjectManager.shared.saveProject(
+                    project,
+                    targetImage: targetForEmbedding,
+                    previewImage: preview,
+                    thumbnails: uniqueThumbnails,
+                    to: destinationURL
+                )
                 await MainActor.run { [weak self] in
                     guard let self = self else { return }
                     self.currentProjectURL = destinationURL
+                    self.hasDiscardedMatchesFromSavedFile = false
+                    self.showingOverwriteSavedWarning = false
                     self.statusMessage = "Project saved: \(destinationURL.lastPathComponent)"
                 }
             } catch {
@@ -937,6 +1131,10 @@ public final class MosaicViewModel: ObservableObject {
     }
     
     public func openProjectPrompt() {
+        guard !isExporting, !isLoadingProject else {
+            statusMessage = "Cannot open project while an operation is in progress."
+            return
+        }
         let panel = NSOpenPanel()
         panel.canChooseFiles = true
         panel.canChooseDirectories = false
@@ -949,6 +1147,7 @@ public final class MosaicViewModel: ObservableObject {
             types.append(macosaixType)
         }
         panel.allowedContentTypes = types
+        panel.allowsOtherFileTypes = true
         panel.prompt = "Open Project"
         
         if panel.runModal() == .OK, let url = panel.url {
@@ -957,43 +1156,190 @@ public final class MosaicViewModel: ObservableObject {
     }
     
     public func openProject(from projectURL: URL) {
-        statusMessage = "Opening \(projectURL.lastPathComponent)..."
+        guard !isExporting, !isLoadingProject else {
+            statusMessage = "Cannot open project while an operation is in progress."
+            return
+        }
+        self.stopMatching()
+        self.tilePrepTask?.cancel()
+        self.sourcesScanTask?.cancel()
+        self.isLoadingProject = true
+        let projName = projectURL.lastPathComponent
+        self.loadingProjectName = projName
+        self.projectLoadingProgress = 0.05
+        self.projectLoadingLogs = ["Opening \(projName)..."]
+        self.statusMessage = "Opening \(projName)..."
         
         Task.detached(priority: .userInitiated) { [weak self] in
             do {
-                let project = try MosaicProjectManager.shared.loadProject(from: projectURL)
+                await MainActor.run { [weak self] in
+                    self?.appendLoadingLog("Reading project bundle...", progress: 0.15)
+                }
+                let bundle = try MosaicProjectManager.shared.loadProjectBundle(from: projectURL)
+                let project = bundle.project
                 
                 await MainActor.run { [weak self] in
-                    guard let self = self else { return }
-                    
-                    self.stopMatching()
-                    
-                    switch project.settings.shapeType.lowercased() {
-                    case "hex", "hexagonal":
-                        self.shapeType = .hexagonal
-                    case "puzzle":
-                        self.shapeType = .puzzle
-                    case "quadtree", "adaptive":
-                        self.shapeType = .quadtree
-                    default:
-                        self.shapeType = .rectangular
+                    self?.appendLoadingLog("Locating target photo...", progress: 0.25)
+                }
+                let targetURL = URL(fileURLWithPath: project.targetImagePath)
+                var resolvedCGImage: CGImage? = nil
+                
+                if FileManager.default.fileExists(atPath: targetURL.path) {
+                    await MainActor.run { [weak self] in
+                        self?.appendLoadingLog("Decoding original target image (\(targetURL.lastPathComponent))...", progress: 0.35)
+                    }
+                    let opts: [CFString: Any] = [kCGImageSourceShouldCache: false]
+                    if let source = CGImageSourceCreateWithURL(targetURL as CFURL, opts as CFDictionary) {
+                        let maxDim: Int = 2048
+                        let thumbOpts: [CFString: Any] = [
+                            kCGImageSourceCreateThumbnailFromImageAlways: true,
+                            kCGImageSourceThumbnailMaxPixelSize: maxDim,
+                            kCGImageSourceCreateThumbnailWithTransform: true,
+                            kCGImageSourceShouldCacheImmediately: true
+                        ]
+                        resolvedCGImage = CGImageSourceCreateThumbnailAtIndex(source, 0, thumbOpts as CFDictionary)
+                    }
+                }
+                
+                // Fallback to embedded target image if original file is missing
+                if resolvedCGImage == nil, let embeddedTarget = bundle.targetImage {
+                    await MainActor.run { [weak self] in
+                        self?.appendLoadingLog("Original photo path not found; using embedded target image.", progress: 0.35)
+                    }
+                    resolvedCGImage = embeddedTarget
+                }
+                
+                guard let rawCGImage = resolvedCGImage else {
+                    await MainActor.run { [weak self] in
+                        guard let self = self else { return }
+                        self.isLoadingProject = false
+                        self.statusMessage = "Could not open target image: \(targetURL.lastPathComponent)"
+                    }
+                    return
+                }
+                
+                let cgImage = MosaicEngine.normalizeToStandardSRGB(rawCGImage)
+                let loadedW = cgImage.width
+                let loadedH = cgImage.height
+                
+                await MainActor.run { [weak self] in
+                    self?.appendLoadingLog("Target image normalized (\(loadedW) × \(loadedH) px)", progress: 0.45)
+                }
+                
+                let shape: MosaicShapeType
+                switch project.settings.shapeType.lowercased() {
+                case "quadtree", "adaptive":
+                    shape = .quadtree
+                default:
+                    shape = .rectangular
+                }
+                
+                let metric: MosaicColorMetric
+                switch project.settings.colorMetric.lowercased() {
+                case "rgb":
+                    metric = .RGB
+                case "monochrome", "mono", "bw":
+                    metric = .monochrome
+                default:
+                    metric = .riemersma
+                }
+                
+                let qAlgo: MosaicQuadtreeAlgorithm = {
+                    switch project.settings.quadtreeAlgorithm {
+                    case "colorRange": return .colorRange
+                    case "variance": return .variance
+                    case "wholeCanvas": return .wholeCanvas
+                    default: return .juliaRange
+                    }
+                }()
+                
+                let newEngine = MosaicEngine(
+                    shapeType: shape,
+                    tilesAcross: project.settings.tilesAcross,
+                    tilesDown: project.settings.tilesDown,
+                    maxReuse: project.settings.maxReuse,
+                    minDistance: project.settings.minDistance,
+                    metric: metric,
+                    edgeWeight: Float(project.settings.edgeWeight),
+                    quadtreeMaxDepth: project.settings.quadtreeMaxDepth,
+                    quadtreeThreshold: Float(project.settings.quadtreeThreshold),
+                    quadtreeBalanced: project.settings.quadtreeBalanced,
+                    quadtreeDetailAlpha: Float(project.settings.quadtreeDetailAlpha),
+                    quadtreeAlgorithm: qAlgo,
+                    quadtreeMinTileDim: Float(project.settings.quadtreeMinTileDim)
+                )
+                
+                await MainActor.run { [weak self] in
+                    self?.appendLoadingLog("Generating tile shapes and rasterizing masks in parallel...", progress: 0.55)
+                }
+                
+                try newEngine.prepare(with: cgImage) { [weak self] subProgress, status in
+                    Task { @MainActor [weak self] in
+                        self?.appendLoadingLog(status, progress: 0.55 + subProgress * 0.25)
+                    }
+                }
+                
+                await MainActor.run { [weak self] in
+                    self?.appendLoadingLog("Restoring tile match history (\(project.tiles.count) records)...", progress: 0.80)
+                }
+                
+                var restoredCount = 0
+                var uniquePaths = Set<String>()
+                for record in project.tiles {
+                    if record.index >= 0 && record.index < newEngine.tiles.count,
+                       let path = record.imagePath {
+                        let tile = newEngine.tiles[record.index]
+                        tile.bestImageIdentifier = path
+                        let tileURL = URL(fileURLWithPath: path)
+                        tile.bestImageURL = tileURL
+                        tile.bestScore = record.score
+                        restoredCount += 1
+                        uniquePaths.insert(path)
+                        
+                        // Seed thumbnail cache immediately if embedded in bundle!
+                        if let thumbFile = record.thumbnailFile, let thumbImg = bundle.thumbnails[thumbFile] {
+                            MosaicThumbnailCache.shared.setThumbnail(thumbImg, for: tileURL)
+                        }
+                    }
+                }
+                
+                if !bundle.thumbnails.isEmpty {
+                    await MainActor.run { [weak self] in
+                        self?.appendLoadingLog("Loaded \(bundle.thumbnails.count) embedded thumbnails (Instant cache)...", progress: 0.90)
+                    }
+                } else {
+                    let uniqueURLs = uniquePaths.map { URL(fileURLWithPath: $0) }
+                    await MainActor.run { [weak self] in
+                        self?.appendLoadingLog("Caching \(uniqueURLs.count) thumbnails across CPU cores...", progress: 0.85)
                     }
                     
+                    // Parallel preheating of unique thumbnails across all CPU cores for legacy projects
+                    await withTaskGroup(of: Void.self) { group in
+                        for url in uniqueURLs {
+                            group.addTask {
+                                MosaicThumbnailCache.shared.preheatThumbnail(for: url, maxPixelSize: 256)
+                            }
+                        }
+                    }
+                }
+                
+                let validSourceFolders = project.sourceFolders.compactMap { path in
+                    let url = URL(fileURLWithPath: path)
+                    return FileManager.default.fileExists(atPath: path) ? url : nil
+                }
+                
+                let finalRestoredCount = restoredCount
+                await MainActor.run { [weak self, finalRestoredCount] in
+                    guard let self = self else { return }
+                    
+                    self.shapeType = shape
                     self.tilesAcross = project.settings.tilesAcross
                     self.tilesDown = project.settings.tilesDown
-                    self.curviness = Double(project.settings.curviness)
                     self.strokeWidth = project.settings.strokeWidth
                     self.strokeColor = project.settings.strokeColor
                     self.maxReuse = project.settings.maxReuse
                     self.minDistance = project.settings.minDistance
-                    switch project.settings.colorMetric.lowercased() {
-                    case "rgb":
-                        self.colorMetric = .RGB
-                    case "monochrome", "mono", "bw":
-                        self.colorMetric = .monochrome
-                    default:
-                        self.colorMetric = .riemersma
-                    }
+                    self.colorMetric = metric
                     self.blendOpacity = project.settings.blendOpacity
                     self.colorTransferStrength = project.settings.colorTransferStrength
                     self.edgeWeight = project.settings.edgeWeight
@@ -1004,116 +1350,46 @@ public final class MosaicViewModel: ObservableObject {
                     self.quadtreeAlgorithm = project.settings.quadtreeAlgorithm
                     self.quadtreeMinTileDim = project.settings.quadtreeMinTileDim
                     
-                    self.sourceFolders = project.sourceFolders.compactMap { path in
-                        let url = URL(fileURLWithPath: path)
-                        return FileManager.default.fileExists(atPath: path) ? url : nil
-                    }
-                    self.rescanSources()
-                    
-                    let targetURL = URL(fileURLWithPath: project.targetImagePath)
-                    guard FileManager.default.fileExists(atPath: targetURL.path) else {
-                        self.statusMessage = "Original image not found at \(targetURL.path)"
-                        return
-                    }
-                    
-                    self.loadTargetImageAndRestoreMatches(targetURL: targetURL, tileRecords: project.tiles, projectURL: projectURL)
-                }
-            } catch {
-                await MainActor.run { [weak self] in
-                    self?.statusMessage = "Could not open project: \(error.localizedDescription)"
-                }
-            }
-        }
-    }
-    
-    private func loadTargetImageAndRestoreMatches(
-        targetURL: URL,
-        tileRecords: [MosaicLabProject.TileMatchRecord],
-        projectURL: URL
-    ) {
-        Task.detached(priority: .userInitiated) { [weak self] in
-            let opts: [CFString: Any] = [kCGImageSourceShouldCache: false]
-            guard let source = CGImageSourceCreateWithURL(targetURL as CFURL, opts as CFDictionary) else {
-                await MainActor.run { [weak self] in
-                    self?.statusMessage = "Could not open target image: \(targetURL.lastPathComponent)"
-                }
-                return
-            }
-            
-            let maxDim: Int = 2048
-            let thumbOpts: [CFString: Any] = [
-                kCGImageSourceCreateThumbnailFromImageAlways: true,
-                kCGImageSourceThumbnailMaxPixelSize: maxDim,
-                kCGImageSourceCreateThumbnailWithTransform: true,
-                kCGImageSourceShouldCacheImmediately: true
-            ]
-            
-            guard let rawCGImage = CGImageSourceCreateThumbnailAtIndex(source, 0, thumbOpts as CFDictionary) else {
-                await MainActor.run { [weak self] in
-                    self?.statusMessage = "Could not decode target image: \(targetURL.lastPathComponent)"
-                }
-                return
-            }
-            
-            // Normalize image (including 10-bit AVIF, HDR HEIC, IOSurface) to standard 8-bit sRGB bitmap
-            let cgImage = MosaicEngine.normalizeToStandardSRGB(rawCGImage)
-            
-            let loadedW = cgImage.width
-            let loadedH = cgImage.height
-            let nsImage = NSImage(cgImage: cgImage, size: NSSize(width: loadedW, height: loadedH))
-            
-            await MainActor.run { [weak self] in
-                guard let self = self else { return }
-                self.targetImageURL = targetURL
-                self.targetCGImage = cgImage
-                self.targetNSImage = nsImage
-                self.targetResolutionText = "\(loadedW) × \(loadedH) px"
-                
-                let newEngine = MosaicEngine(
-                    shapeType: self.shapeType,
-                    tilesAcross: self.tilesAcross,
-                    tilesDown: self.tilesDown,
-                    curviness: Float(self.curviness),
-                    maxReuse: self.maxReuse,
-                    minDistance: self.minDistance,
-                    metric: self.colorMetric,
-                    edgeWeight: Float(self.edgeWeight),
-                    quadtreeMaxDepth: self.quadtreeMaxDepth,
-                    quadtreeThreshold: Float(self.quadtreeThreshold),
-                    quadtreeBalanced: self.quadtreeBalanced,
-                    quadtreeDetailAlpha: Float(self.quadtreeDetailAlpha),
-                    quadtreeAlgorithm: self.quadtreeAlgorithm == "wholeCanvas" ? .wholeCanvas : (self.quadtreeAlgorithm == "colorRange" ? .colorRange : (self.quadtreeAlgorithm == "variance" ? .variance : .juliaRange)),
-                    quadtreeMinTileDim: Float(self.quadtreeMinTileDim)
-                )
-                
-                do {
-                    try newEngine.prepare(with: cgImage)
-                    
-                    var restoredCount = 0
-                    for record in tileRecords {
-                        if record.index >= 0 && record.index < newEngine.tiles.count,
-                           let path = record.imagePath {
-                            let url = URL(fileURLWithPath: path)
-                            if FileManager.default.fileExists(atPath: path) {
-                                let tile = newEngine.tiles[record.index]
-                                tile.bestImageIdentifier = path
-                                tile.bestImageURL = url
-                                tile.bestScore = record.score
-                                restoredCount += 1
-                                MosaicThumbnailCache.shared.preheatThumbnail(for: url)
-                            }
-                        }
-                    }
+                    self.targetImageURL = targetURL
+                    self.targetCGImage = cgImage
+                    self.targetNSImage = NSImage(cgImage: cgImage, size: NSSize(width: loadedW, height: loadedH))
+                    self.targetResolutionText = "\(loadedW) × \(loadedH) px"
                     
                     self.engine = newEngine
                     self.totalTilesCount = newEngine.tiles.count
-                    self.matchedTilesCount = restoredCount
+                    self.matchedTilesCount = finalRestoredCount
                     self.currentProjectURL = projectURL
+                    self.hasDiscardedMatchesFromSavedFile = false
+                    self.showingOverwriteSavedWarning = false
+                    
+                    if shape == .quadtree && !newEngine.tiles.isEmpty {
+                        let minW = newEngine.tiles.map { $0.geometry.bounds.width }.min() ?? 0
+                        let minH = newEngine.tiles.map { $0.geometry.bounds.height }.min() ?? 0
+                        let maxW = newEngine.tiles.map { $0.geometry.bounds.width }.max() ?? 0
+                        let maxH = newEngine.tiles.map { $0.geometry.bounds.height }.max() ?? 0
+                        self.quadtreeSizeSummary = "Tile sizes: \(Int(round(maxW)))×\(Int(round(maxH))) px down to \(Int(round(minW)))×\(Int(round(minH))) px"
+                    } else {
+                        self.quadtreeSizeSummary = ""
+                    }
+                    
+                    self.sourceFolders = validSourceFolders
                     self.canvasVersion += 1
                     self.updateMemoryEstimate()
-                    self.statusMessage = "Project restored! \(restoredCount)/\(newEngine.tiles.count) tiles matched."
-                } catch {
-                    self.statusMessage = "Error preparing mosaic tiles: \(error.localizedDescription)"
+                    
+                    self.appendLoadingLog("Completed! Restored \(finalRestoredCount) / \(newEngine.tiles.count) matched tiles.", progress: 1.0)
+                    self.statusMessage = "Project loaded! \(finalRestoredCount)/\(newEngine.tiles.count) tiles matched."
+                    
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in
+                        self?.isLoadingProject = false
+                    }
+                    
+                    self.rescanSources()
+                }
+            } catch {
+                await MainActor.run { [weak self] in
+                    guard let self = self else { return }
+                    self.isLoadingProject = false
+                    self.statusMessage = "Could not open project: \(error.localizedDescription)"
                 }
             }
         }

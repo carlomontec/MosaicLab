@@ -26,6 +26,7 @@ public struct TileDetailPopover: View {
                     Image(nsImage: nsImg)
                         .resizable()
                         .scaledToFit()
+                        .grayscale(viewModel.colorMetric == .monochrome ? 1.0 : 0.0)
                         .frame(maxWidth: 240, maxHeight: 180)
                         .cornerRadius(6)
                         .shadow(radius: 2)

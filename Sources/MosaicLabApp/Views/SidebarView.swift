@@ -21,11 +21,31 @@ public struct SidebarView: View {
                 // Section 2: Tile Shapes
                 GroupBox(label: Label("Tile Shapes", systemImage: "square.grid.2x2")) {
                     VStack(alignment: .leading, spacing: 12) {
-                        Picker("Shape", selection: $viewModel.shapeType) {
-                            Text("Square").tag(MosaicShapeType.rectangular)
-                            Text("Hexagon").tag(MosaicShapeType.hexagonal)
-                            Text("Puzzle").tag(MosaicShapeType.puzzle)
-                            Text("Adaptive").tag(MosaicShapeType.quadtree)
+                        if viewModel.hasCompletedTiles {
+                            HStack(spacing: 6) {
+                                Image(systemName: "lock.fill")
+                                    .foregroundColor(.secondary)
+                                Text("Grid locked (\(viewModel.matchedTilesCount) matches)")
+                                    .font(.caption2)
+                                    .foregroundColor(.secondary)
+                                Spacer()
+                            }
+                            .padding(.vertical, 2)
+                        }
+                        
+                        Picker("Shape", selection: Binding(
+                            get: { viewModel.shapeType },
+                            set: { newShape in
+                                if newShape != viewModel.shapeType {
+                                    let name = (newShape == .quadtree) ? "Adaptive Quadtree" : "Uniform Grid"
+                                    viewModel.proposeLayoutChange(description: "Tile Shape to \(name)") {
+                                        viewModel.shapeType = newShape
+                                    }
+                                }
+                            }
+                        )) {
+                            Text("Uniform Grid").tag(MosaicShapeType.rectangular)
+                            Text("Adaptive Quadtree").tag(MosaicShapeType.quadtree)
                         }
                         .pickerStyle(.segmented)
                         .disabled(viewModel.isRunning)
@@ -41,7 +61,15 @@ public struct SidebarView: View {
                             .font(.caption)
                             Slider(value: Binding(
                                 get: { Double(viewModel.tilesAcross) },
-                                set: { viewModel.tilesAcross = Int($0) }
+                                set: { newVal in
+                                    let val = Int(newVal)
+                                    if val != viewModel.tilesAcross {
+                                        let label = viewModel.shapeType == .quadtree ? "Base Grid Across" : "Tiles Across"
+                                        viewModel.proposeLayoutChange(description: "\(label) to \(val)") {
+                                            viewModel.tilesAcross = val
+                                        }
+                                    }
+                                }
                             ), in: (viewModel.shapeType == .quadtree ? 4...30 : 10...80), step: 2)
                             .disabled(viewModel.isRunning)
                         }
@@ -57,7 +85,15 @@ public struct SidebarView: View {
                             .font(.caption)
                             Slider(value: Binding(
                                 get: { Double(viewModel.tilesDown) },
-                                set: { viewModel.tilesDown = Int($0) }
+                                set: { newVal in
+                                    let val = Int(newVal)
+                                    if val != viewModel.tilesDown {
+                                        let label = viewModel.shapeType == .quadtree ? "Base Grid Down" : "Tiles Down"
+                                        viewModel.proposeLayoutChange(description: "\(label) to \(val)") {
+                                            viewModel.tilesDown = val
+                                        }
+                                    }
+                                }
                             ), in: (viewModel.shapeType == .quadtree ? 4...24 : 10...60), step: 2)
                             .disabled(viewModel.isRunning)
                         }
@@ -66,7 +102,16 @@ public struct SidebarView: View {
                             VStack(alignment: .leading, spacing: 4) {
                                 Text("Segmentation Algorithm:")
                                     .font(.caption)
-                                Picker("", selection: $viewModel.quadtreeAlgorithm) {
+                                Picker("", selection: Binding(
+                                    get: { viewModel.quadtreeAlgorithm },
+                                    set: { newAlgo in
+                                        if newAlgo != viewModel.quadtreeAlgorithm {
+                                            viewModel.proposeLayoutChange(description: "Segmentation Algorithm") {
+                                                viewModel.quadtreeAlgorithm = newAlgo
+                                            }
+                                        }
+                                    }
+                                )) {
                                     Text("Julia Range (max - min)").tag("juliaRange")
                                     Text("Whole Canvas Quadtree").tag("wholeCanvas")
                                     Text("RGB Color Range").tag("colorRange")
@@ -86,7 +131,16 @@ public struct SidebarView: View {
                                         .monospacedDigit()
                                 }
                                 .font(.caption)
-                                Picker("", selection: $viewModel.quadtreeMinTileDim) {
+                                Picker("", selection: Binding(
+                                    get: { viewModel.quadtreeMinTileDim },
+                                    set: { newDim in
+                                        if newDim != viewModel.quadtreeMinTileDim {
+                                            viewModel.proposeLayoutChange(description: "Min Tile Size to \(Int(newDim)) px") {
+                                                viewModel.quadtreeMinTileDim = newDim
+                                            }
+                                        }
+                                    }
+                                )) {
                                     Text("4 px").tag(4.0)
                                     Text("8 px").tag(8.0)
                                     Text("16 px").tag(16.0)
@@ -114,7 +168,14 @@ public struct SidebarView: View {
                                 .font(.caption)
                                 Slider(value: Binding(
                                     get: { Double(viewModel.quadtreeMaxDepth) },
-                                    set: { viewModel.quadtreeMaxDepth = Int($0) }
+                                    set: { newVal in
+                                        let val = Int(newVal)
+                                        if val != viewModel.quadtreeMaxDepth {
+                                            viewModel.proposeLayoutChange(description: "Max Subdivision to Level \(val)") {
+                                                viewModel.quadtreeMaxDepth = val
+                                            }
+                                        }
+                                    }
                                 ), in: 1...5, step: 1)
                                 .disabled(viewModel.isRunning)
                             }
@@ -150,17 +211,31 @@ public struct SidebarView: View {
                                         return max(0.0, min(1.0, s))
                                     },
                                     set: { newSens in
-                                        let thresh = 0.85 - (newSens * 0.80)
-                                        viewModel.quadtreeThreshold = round(thresh * 1000.0) / 1000.0
+                                        let thresh = round((0.85 - (newSens * 0.80)) * 1000.0) / 1000.0
+                                        if thresh != viewModel.quadtreeThreshold {
+                                            let sensPct = Int(round(newSens * 100))
+                                            viewModel.proposeLayoutChange(description: "Detail Sensitivity to \(sensPct)%") {
+                                                viewModel.quadtreeThreshold = thresh
+                                            }
+                                        }
                                     }
                                 ), in: 0.0...1.0, step: 0.01)
                                 .disabled(viewModel.isRunning)
                             }
                             
-                            Toggle("2:1 Balanced Transitions", isOn: $viewModel.quadtreeBalanced)
-                                .font(.caption)
-                                .disabled(viewModel.isRunning)
-                                .help("Ensures adjacent tiles differ by at most one subdivision level for smooth, organic transitions (Klein et al. 2002)")
+                            Toggle("2:1 Balanced Transitions", isOn: Binding(
+                                get: { viewModel.quadtreeBalanced },
+                                set: { newBal in
+                                    if newBal != viewModel.quadtreeBalanced {
+                                        viewModel.proposeLayoutChange(description: "2:1 Balanced Transitions") {
+                                            viewModel.quadtreeBalanced = newBal
+                                        }
+                                    }
+                                }
+                            ))
+                            .font(.caption)
+                            .disabled(viewModel.isRunning)
+                            .help("Ensures adjacent tiles differ by at most one subdivision level for smooth, organic transitions (Klein et al. 2002)")
                             
                             if viewModel.quadtreeAlgorithm == "variance" {
                                 VStack(alignment: .leading, spacing: 4) {
@@ -173,10 +248,16 @@ public struct SidebarView: View {
                                             else { return "balanced" }
                                         },
                                         set: { mode in
+                                            let newAlpha: Double
                                             switch mode {
-                                            case "edge": viewModel.quadtreeDetailAlpha = 0.2
-                                            case "texture": viewModel.quadtreeDetailAlpha = 0.8
-                                            default: viewModel.quadtreeDetailAlpha = 0.5
+                                            case "edge": newAlpha = 0.2
+                                            case "texture": newAlpha = 0.8
+                                            default: newAlpha = 0.5
+                                            }
+                                            if newAlpha != viewModel.quadtreeDetailAlpha {
+                                                viewModel.proposeLayoutChange(description: "Detail Mode") {
+                                                    viewModel.quadtreeDetailAlpha = newAlpha
+                                                }
                                             }
                                         }
                                     )) {
@@ -191,24 +272,9 @@ public struct SidebarView: View {
                             }
                         }
                         
-                        if viewModel.shapeType == .puzzle {
-                            VStack(alignment: .leading, spacing: 4) {
-                                HStack {
-                                    Text("Puzzle Curviness:")
-                                    Spacer()
-                                    Text(String(format: "%.1f", viewModel.curviness))
-                                        .foregroundColor(.secondary)
-                                        .monospacedDigit()
-                                }
-                                .font(.caption)
-                                Slider(value: $viewModel.curviness, in: 0.0...1.0, step: 0.1)
-                                .disabled(viewModel.isRunning)
-                            }
-                        }
-                        
                         VStack(alignment: .leading, spacing: 4) {
                             HStack {
-                                Text("Piece Cutlines:")
+                                Text("Tile Outlines:")
                                 Spacer()
                                 Text(viewModel.strokeWidth > 0 ? String(format: "%.1f px", viewModel.strokeWidth) : "Off")
                                     .foregroundColor(.secondary)
@@ -219,7 +285,7 @@ public struct SidebarView: View {
                             
                             if viewModel.strokeWidth > 0 {
                                 HStack {
-                                    Text("Cutline Color:")
+                                    Text("Outline Color:")
                                         .font(.caption)
                                     Spacer()
                                     Picker("", selection: $viewModel.strokeColor) {
@@ -260,7 +326,16 @@ public struct SidebarView: View {
                         // Source 1: Apple Photos
                         VStack(alignment: .leading, spacing: 6) {
                             HStack {
-                                Toggle(isOn: $viewModel.useApplePhotos) {
+                                Toggle(isOn: Binding(
+                                    get: { viewModel.useApplePhotos },
+                                    set: { newVal in
+                                        if newVal != viewModel.useApplePhotos {
+                                            viewModel.proposeLayoutChange(description: "Apple Photos Source") {
+                                                viewModel.useApplePhotos = newVal
+                                            }
+                                        }
+                                    }
+                                )) {
                                     HStack(spacing: 4) {
                                         Image(systemName: "photo.stack")
                                             .foregroundColor(.accentColor)
@@ -309,7 +384,16 @@ public struct SidebarView: View {
                                         Text("Album:")
                                             .font(.caption)
                                         Spacer()
-                                        Picker("", selection: $viewModel.selectedAlbumID) {
+                                        Picker("", selection: Binding(
+                                            get: { viewModel.selectedAlbumID },
+                                            set: { newAlbum in
+                                                if newAlbum != viewModel.selectedAlbumID {
+                                                    viewModel.proposeLayoutChange(description: "Photos Album Selection") {
+                                                        viewModel.selectedAlbumID = newAlbum
+                                                    }
+                                                }
+                                            }
+                                        )) {
                                             ForEach(viewModel.availableAlbums) { album in
                                                 Label("\(album.title) (\(album.count))", systemImage: album.iconName)
                                                     .tag(album.id)
@@ -340,7 +424,16 @@ public struct SidebarView: View {
                         
                         // Source 2: Local Folders
                         VStack(alignment: .leading, spacing: 6) {
-                            Toggle(isOn: $viewModel.useLocalFolders) {
+                            Toggle(isOn: Binding(
+                                get: { viewModel.useLocalFolders },
+                                set: { newVal in
+                                    if newVal != viewModel.useLocalFolders {
+                                        viewModel.proposeLayoutChange(description: "Local Folders Source") {
+                                            viewModel.useLocalFolders = newVal
+                                        }
+                                    }
+                                }
+                            )) {
                                 HStack(spacing: 4) {
                                     Image(systemName: "folder")
                                         .foregroundColor(.accentColor)
@@ -369,7 +462,9 @@ public struct SidebarView: View {
                                             .truncationMode(.middle)
                                         Spacer()
                                         Button(action: {
-                                            viewModel.removeSourceFolder(folder)
+                                            viewModel.proposeLayoutChange(description: "Remove Folder (\(folder.lastPathComponent))") {
+                                                viewModel.removeSourceFolder(folder)
+                                            }
                                         }) {
                                             Image(systemName: "trash")
                                                 .font(.caption2)
@@ -447,7 +542,6 @@ public struct SidebarView: View {
                         )
                 )
                 .onDrop(of: [.fileURL], isTargeted: $viewModel.isSourcesDropTargeted) { providers in
-                    viewModel.useLocalFolders = true
                     handleDroppedSources(providers)
                     return true
                 }
@@ -466,7 +560,15 @@ public struct SidebarView: View {
                             .font(.caption)
                             Slider(value: Binding(
                                 get: { Double(viewModel.maxReuse) },
-                                set: { viewModel.maxReuse = Int($0) }
+                                set: { newVal in
+                                    let val = Int(newVal)
+                                    if val != viewModel.maxReuse {
+                                        let label = val == 0 ? "Unlimited" : "\(val)×"
+                                        viewModel.proposeLayoutChange(description: "Max Reuse to \(label)") {
+                                            viewModel.maxReuse = val
+                                        }
+                                    }
+                                }
                             ), in: 0...10, step: 1)
                             .disabled(viewModel.isRunning)
                         }
@@ -482,12 +584,29 @@ public struct SidebarView: View {
                             .font(.caption)
                             Slider(value: Binding(
                                 get: { Double(viewModel.minDistance) },
-                                set: { viewModel.minDistance = Int($0) }
+                                set: { newVal in
+                                    let val = Int(newVal)
+                                    if val != viewModel.minDistance {
+                                        viewModel.proposeLayoutChange(description: "Min Distance to \(val) tiles") {
+                                            viewModel.minDistance = val
+                                        }
+                                    }
+                                }
                             ), in: 0...6, step: 1)
                             .disabled(viewModel.isRunning)
                         }
                         
-                        Picker("Metric", selection: $viewModel.colorMetric) {
+                        Picker("Metric", selection: Binding(
+                            get: { viewModel.colorMetric },
+                            set: { newMetric in
+                                if newMetric != viewModel.colorMetric {
+                                    let label = (newMetric == .riemersma) ? "Riemersma (Eye)" : (newMetric == .RGB ? "RGB Distance" : "Monochrome (B&W)")
+                                    viewModel.proposeLayoutChange(description: "Color Metric to \(label)") {
+                                        viewModel.colorMetric = newMetric
+                                    }
+                                }
+                            }
+                        )) {
                             Text("Riemersma (Eye)").tag(MosaicColorMetric.riemersma)
                             Text("RGB Distance").tag(MosaicColorMetric.RGB)
                             Text("Monochrome (B&W)").tag(MosaicColorMetric.monochrome)
@@ -520,9 +639,20 @@ public struct SidebarView: View {
                                     .monospacedDigit()
                             }
                             .font(.caption)
-                            Slider(value: $viewModel.edgeWeight, in: 0.0...1.0)
-                                .disabled(viewModel.isRunning)
-                                .help("Edge-Aware Directional Matching: aligns constituent photos' internal structural lines and contours with the target image")
+                            Slider(value: Binding(
+                                get: { viewModel.edgeWeight },
+                                set: { newVal in
+                                    let rounded = round(newVal * 100.0) / 100.0
+                                    if abs(rounded - viewModel.edgeWeight) > 0.02 {
+                                        let pct = Int(round(rounded * 100))
+                                        viewModel.proposeLayoutChange(description: "Edge Alignment to \(pct)%") {
+                                            viewModel.edgeWeight = rounded
+                                        }
+                                    }
+                                }
+                            ), in: 0.0...1.0)
+                            .disabled(viewModel.isRunning)
+                            .help("Edge-Aware Directional Matching: aligns constituent photos' internal structural lines and contours with the target image")
                         }
                     }
                     .padding(.top, 4)
@@ -545,9 +675,11 @@ public struct SidebarView: View {
             }
             .padding()
         }
+        .disabled(viewModel.isExporting || viewModel.isLoadingProject)
     }
     
     private func chooseSourceFolder() {
+        guard !viewModel.isExporting, !viewModel.isLoadingProject else { return }
         let panel = NSOpenPanel()
         panel.canChooseFiles = false
         panel.canChooseDirectories = true
@@ -555,25 +687,28 @@ public struct SidebarView: View {
         panel.prompt = "Add Photos"
         
         if panel.runModal() == .OK {
-            for url in panel.urls {
-                viewModel.addSourceFolder(url)
+            let selectedURLs = panel.urls
+            viewModel.proposeLayoutChange(description: "Add Photo Folders") {
+                viewModel.useLocalFolders = true
+                for url in selectedURLs {
+                    viewModel.addSourceFolder(url)
+                }
             }
         }
     }
     
     private func handleDroppedSources(_ providers: [NSItemProvider]) {
+        guard !viewModel.isExporting, !viewModel.isLoadingProject else { return }
         for provider in providers {
             _ = provider.loadObject(ofClass: URL.self) { url, _ in
                 guard let fileURL = url else { return }
                 var isDir: ObjCBool = false
                 if FileManager.default.fileExists(atPath: fileURL.path, isDirectory: &isDir) {
                     DispatchQueue.main.async {
-                        if isDir.boolValue {
-                            viewModel.addSourceFolder(fileURL)
-                        } else {
-                            // If an image file was dropped, add its containing folder
-                            let folder = fileURL.deletingLastPathComponent()
-                            viewModel.addSourceFolder(folder)
+                        let folderToAdd = isDir.boolValue ? fileURL : fileURL.deletingLastPathComponent()
+                        viewModel.proposeLayoutChange(description: "Add Photo Folder (\(folderToAdd.lastPathComponent))") {
+                            viewModel.useLocalFolders = true
+                            viewModel.addSourceFolder(folderToAdd)
                         }
                     }
                 }

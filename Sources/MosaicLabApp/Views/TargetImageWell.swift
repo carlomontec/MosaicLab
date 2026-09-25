@@ -14,15 +14,22 @@ public struct TargetImageWell: View {
                     Image(nsImage: nsImage)
                         .resizable()
                         .scaledToFit()
+                        .grayscale(viewModel.colorMetric == .monochrome ? 1.0 : 0.0)
                         .frame(maxHeight: 140)
                         .cornerRadius(6)
                         .shadow(color: .black.opacity(0.15), radius: 3, x: 0, y: 1)
                     
                     Button(action: {
-                        viewModel.targetImageURL = nil
-                        viewModel.targetNSImage = nil
-                        viewModel.targetCGImage = nil
-                        viewModel.targetResolutionText = "No image loaded"
+                        viewModel.proposeLayoutChange(description: "Clear Target Image") {
+                            viewModel.targetImageURL = nil
+                            viewModel.targetNSImage = nil
+                            viewModel.targetCGImage = nil
+                            viewModel.targetResolutionText = "No image loaded"
+                            viewModel.engine = nil
+                            viewModel.totalTilesCount = 0
+                            viewModel.matchedTilesCount = 0
+                            viewModel.statusMessage = "Target image cleared."
+                        }
                     }) {
                         Image(systemName: "xmark.circle.fill")
                             .symbolRenderingMode(.hierarchical)
@@ -76,10 +83,13 @@ public struct TargetImageWell: View {
             _ = provider.loadObject(ofClass: URL.self) { url, _ in
                 guard let fileURL = url else { return }
                 DispatchQueue.main.async {
-                    if fileURL.pathExtension.lowercased() == "macosaix" {
+                    let ext = fileURL.pathExtension.lowercased()
+                    if ext == "mosaiclab" || ext == "macosaix" {
                         viewModel.openProject(from: fileURL)
                     } else {
-                        viewModel.setTargetImage(from: fileURL)
+                        viewModel.proposeLayoutChange(description: "New Target Image (\(fileURL.lastPathComponent))") {
+                            viewModel.setTargetImage(from: fileURL)
+                        }
                     }
                 }
             }
@@ -107,7 +117,9 @@ public struct TargetImageWell: View {
         panel.prompt = "Choose Target"
         
         if panel.runModal() == .OK, let url = panel.url {
-            viewModel.setTargetImage(from: url)
+            viewModel.proposeLayoutChange(description: "New Target Image (\(url.lastPathComponent))") {
+                viewModel.setTargetImage(from: url)
+            }
         }
     }
 }

@@ -15,7 +15,7 @@ func printUsage() {
       --target <path>        Target image to turn into a mosaic (HEIC, JPEG, PNG, etc.)
       --sources <folder>     Folder of source photos (HEIC, JPEG, PNG, etc.)
       --output <path>        Output image path (default: mosaic.png)
-      --shape <type>         Tile shape: rect | hex | puzzle | quadtree (default: rect)
+      --shape <type>         Tile shape: rect | quadtree (default: rect)
       --across <N>           Tiles horizontally (default: 30, or base across for quadtree)
       --down <N>             Tiles vertically (default: 20, or base down for quadtree)
       --quadtree-depth <N>   Max quadtree subdivision depth 1 - 5 (default: 3)
@@ -24,12 +24,11 @@ func printUsage() {
       --quadtree-algo <a>    Segmentation algorithm: julia | color | variance | whole (default: julia)
       --quadtree-min-tile <N> Smallest tile dimension in pixels (default: 16)
       --quadtree-mode <m>    Detail mode for variance: edge | balanced | texture (default: balanced)
-      --curviness <float>    Puzzle edge curviness 0.0 - 1.0 (default: 0.5)
       --max-reuse <N>        Maximum times any photo can be reused (default: 0 = unlimited)
       --min-distance <N>     Minimum tile distance between identical photos (default: 2)
       --width <pixels>       Output mosaic pixel width (default: 2400)
       --stroke <pixels>      Tile border stroke width (default: 0.0)
-      --stroke-color <c>     Cutline border stroke color: black | white (default: black)
+      --stroke-color <c>     Tile outline stroke color: black | white (default: black)
       --color-transfer <f>   Reinhard perceptual color transfer 0.0 - 1.0 (default: 0.0)
       --edge-weight <f>      Edge-aware directional matching 0.0 - 1.0 (default: 0.0)
       --metric <type>        Color metric: riemersma | rgb | monochrome (default: riemersma)
@@ -78,7 +77,6 @@ func main() async {
     let shapeStr = args["shape"]?.lowercased() ?? "rect"
     let across = Int(args["across"] ?? "30") ?? 30
     let down = Int(args["down"] ?? "20") ?? 20
-    let curviness = Float(args["curviness"] ?? "0.5") ?? 0.5
     let maxReuse = Int(args["max-reuse"] ?? "0") ?? 0
     let minDistance = Int(args["min-distance"] ?? "2") ?? 2
     let outputWidth = Int(args["width"] ?? "2400") ?? 2400
@@ -111,10 +109,6 @@ func main() async {
     
     let shapeType: MosaicShapeType
     switch shapeStr {
-    case "hex", "hexagonal":
-        shapeType = .hexagonal
-    case "puzzle":
-        shapeType = .puzzle
     case "quadtree", "adaptive":
         shapeType = .quadtree
     default:
@@ -184,7 +178,6 @@ func main() async {
         shapeType: shapeType,
         tilesAcross: across,
         tilesDown: down,
-        curviness: curviness,
         maxReuse: maxReuse,
         minDistance: minDistance,
         metric: colorMetric,

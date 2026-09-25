@@ -46,9 +46,8 @@ To preserve the visual flow of lines, strokes, and contours:
 - **Placement Controls**: Enforce single-use mode (`--max-reuse 1`) or space identical photos apart using minimum grid distance constraints.
 
 ### 🧩 Geometric Tessellations
-- **Jigsaw Puzzles (`puzzle`)**: Interlocking cubic Bézier tabs and sockets with configurable curviness and tab ratio parameters.
-- **Hexagonal Honeycombs (`hex`)**: Hexagonal grid with coordinate clamping along canvas boundaries.
-- **Classic Rectangles (`rect`)**: Uniform rectangular grid for classic photomosaics.
+- **Uniform Rectangles (`rect`)**: Classic grid tessellation with configurable horizontal and vertical tile density.
+- **Adaptive Multi-Scale Quadtrees (`quadtree`)**: Dynamic multi-resolution hierarchical subdivision driven by Julia extrema range, RGB Chebyshev divergence, or summed-area table variance, with strict 2:1 neighbor balancing.
 
 ### ⚡ Native Performance & Media Pipeline
 - **Modern Apple Stack**: Built with Swift, CoreGraphics, ImageIO, and PhotoKit targeting macOS and iPadOS/iOS.

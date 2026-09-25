@@ -6,10 +6,9 @@ public final class MosaicEngine: @unchecked Sendable {
     public let shapeType: MosaicShapeType
     public let tilesAcross: Int
     public let tilesDown: Int
-    public let curviness: Float
     public let maxReuse: Int
     public let minDistance: Int
-    public let metric: MosaicColorMetric
+    public var metric: MosaicColorMetric
     
     public private(set) var tiles: [MosaicTile] = []
     public private(set) var mosaicSize: CGSize = .zero
@@ -38,7 +37,6 @@ public final class MosaicEngine: @unchecked Sendable {
         shapeType: MosaicShapeType,
         tilesAcross: Int,
         tilesDown: Int,
-        curviness: Float,
         maxReuse: Int = 0,
         minDistance: Int = 0,
         metric: MosaicColorMetric = .riemersma,
@@ -53,7 +51,6 @@ public final class MosaicEngine: @unchecked Sendable {
         self.shapeType = shapeType
         self.tilesAcross = tilesAcross
         self.tilesDown = tilesDown
-        self.curviness = curviness
         self.maxReuse = maxReuse
         self.minDistance = minDistance
         self.metric = metric
@@ -113,12 +110,17 @@ public final class MosaicEngine: @unchecked Sendable {
     }
     
     /// Prepares tile geometries, masks, and snippets using an in-memory CGImage.
-    public func prepare(with image: CGImage) throws {
+    public func prepare(
+        with image: CGImage,
+        progressHandler: ((Double, String) -> Void)? = nil
+    ) throws {
         let normalizedImage = Self.normalizeToStandardSRGB(image)
         self.targetImage = normalizedImage
         self.mosaicSize = CGSize(width: normalizedImage.width, height: normalizedImage.height)
         self.isCancelled = false
         self.isPaused = false
+        
+        progressHandler?(0.1, "Subdividing tile geometries...")
         
         // Generate tile shapes using battle-tested geometry formulas
         let geometries = MosaicShapes.generateShapes(
@@ -127,8 +129,6 @@ public final class MosaicEngine: @unchecked Sendable {
             mosaicSize: mosaicSize,
             across: tilesAcross,
             down: tilesDown,
-            curviness: curviness,
-            tabRatio: 0.8,
             maxDepth: quadtreeMaxDepth,
             detailThreshold: quadtreeThreshold,
             balanced: quadtreeBalanced,
@@ -137,13 +137,33 @@ public final class MosaicEngine: @unchecked Sendable {
             minTileDim: quadtreeMinTileDim
         )
         
-        // Build tile objects and extract thumbnails & masks
-        self.tiles = geometries.map { geom in
-            let tile = MosaicTile(geometry: geom)
+        progressHandler?(0.35, "Rasterizing masks and metrics for \(geometries.count) tiles in parallel...")
+        
+        // Build tile objects and extract thumbnails & masks concurrently across CPU cores
+        let totalCount = geometries.count
+        let mSize = self.mosaicSize
+        let tileArray = geometries.map { MosaicTile(geometry: $0) }
+        
+        DispatchQueue.concurrentPerform(iterations: totalCount) { idx in
+            let tile = tileArray[idx]
             tile.rasterizeMask(withResolution: 16)
-            tile.extractTargetThumbnail(from: normalizedImage, mosaicSize: self.mosaicSize)
-            return tile
+            tile.extractTargetThumbnail(from: normalizedImage, mosaicSize: mSize)
         }
+        
+        self.tiles = tileArray
+        progressHandler?(1.0, "Generated \(totalCount) tile shapes.")
+    }
+    
+    /// Clears existing match results from all tiles without regenerating geometries.
+    public func resetMatches() {
+        for tile in tiles {
+            tile.bestImageURL = nil
+            tile.bestImageIdentifier = nil
+            tile.bestScore = 1.0
+        }
+        candidateStoreLock.lock()
+        candidateStore.removeAll()
+        candidateStoreLock.unlock()
     }
     
     /// Processes an image candidate and tests it against all tiles. Returns true if any tile was updated.
@@ -365,7 +385,7 @@ public final class MosaicEngine: @unchecked Sendable {
         tile.bestScore = bestScore
         tile.bestImageIdentifier = winnerID
         tile.bestImageURL = winnerURL
-        MosaicThumbnailCache.shared.preheatThumbnail(for: winnerURL, maxPixelSize: 140)
+        MosaicThumbnailCache.shared.preheatThumbnail(for: winnerURL, maxPixelSize: 256)
         onTileUpdated?(tile.geometry.tileIndex)
         return (winnerURL, bestScore)
     }
@@ -402,7 +422,7 @@ public final class MosaicEngine: @unchecked Sendable {
         tile.bestScore = score
         tile.bestImageIdentifier = identifier
         tile.bestImageURL = url
-        MosaicThumbnailCache.shared.preheatThumbnail(for: url, maxPixelSize: 140)
+        MosaicThumbnailCache.shared.preheatThumbnail(for: url, maxPixelSize: 256)
         onTileUpdated?(tile.geometry.tileIndex)
         return score
     }

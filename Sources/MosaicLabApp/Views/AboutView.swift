@@ -60,7 +60,7 @@ public struct AboutView: View {
                         bulletPoint("Reinhard statistical color transfer in OKLab perceptual color space")
                         bulletPoint("Multi-threaded asynchronous solver with real-time memory safety check")
                         bulletPoint("Native Apple Photos (PhotoKit) and local folder source pooling")
-                        bulletPoint("Interlocking cubic Bézier jigsaw puzzles, hexagonal, and rectangular tessellations")
+                        bulletPoint("Uniform grid and adaptive multi-scale quadtree tessellations")
                     }
                     .padding(.top, 2)
                     .padding(.leading, 6)

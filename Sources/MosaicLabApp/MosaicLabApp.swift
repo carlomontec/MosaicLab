@@ -5,30 +5,53 @@ import AppKit
 final class MosaicLabAppDelegate: NSObject, NSApplicationDelegate {
     weak var viewModel: MosaicViewModel?
     private var pendingOpenURL: URL?
+    private var lastHandledURL: URL?
+    private var lastHandledTime: TimeInterval = 0
     
     func setViewModel(_ vm: MosaicViewModel) {
         self.viewModel = vm
         if let pending = pendingOpenURL {
-            vm.openProject(from: pending)
+            handleOpenURL(pending)
             pendingOpenURL = nil
+        }
+    }
+    
+    func handleOpenURL(_ url: URL) {
+        let ext = url.pathExtension.lowercased()
+        guard ext == "mosaiclab" || ext == "macosaix" else { return }
+        
+        let now = ProcessInfo.processInfo.systemUptime
+        if lastHandledURL == url && (now - lastHandledTime) < 1.5 {
+            return
+        }
+        lastHandledURL = url
+        lastHandledTime = now
+        
+        if let vm = viewModel {
+            vm.openProject(from: url)
+            NSApplication.shared.activate(ignoringOtherApps: true)
+        } else {
+            pendingOpenURL = url
         }
     }
     
     nonisolated func application(_ sender: NSApplication, openFiles filenames: [String]) {
         for filename in filenames {
             let url = URL(fileURLWithPath: filename)
-            let ext = url.pathExtension.lowercased()
-            if ext == "mosaiclab" {
-                Task { @MainActor [weak self] in
-                    if let vm = self?.viewModel {
-                        vm.openProject(from: url)
-                    } else {
-                        self?.pendingOpenURL = url
-                    }
-                }
-                break
+            Task { @MainActor [weak self] in
+                self?.handleOpenURL(url)
+                sender.reply(toOpenOrPrint: .success)
             }
         }
+    }
+    
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        if !flag {
+            for window in sender.windows {
+                window.makeKeyAndOrderFront(nil)
+            }
+        }
+        return true
     }
 }
 
@@ -38,7 +61,7 @@ struct MosaicLabApp: App {
     @StateObject private var viewModel = MosaicViewModel()
     
     var body: some Scene {
-        WindowGroup {
+        Window("MosaicLab", id: "main") {
             MainWindowView()
                 .environmentObject(viewModel)
                 .frame(minWidth: 960, minHeight: 650)
@@ -47,10 +70,7 @@ struct MosaicLabApp: App {
                     appDelegate.setViewModel(viewModel)
                 }
                 .onOpenURL { url in
-                    let ext = url.pathExtension.lowercased()
-                    if ext == "mosaiclab" {
-                        viewModel.openProject(from: url)
-                    }
+                    appDelegate.handleOpenURL(url)
                 }
         }
         .windowStyle(.titleBar)
@@ -67,11 +87,13 @@ struct MosaicLabApp: App {
                     viewModel.newProject()
                 }
                 .keyboardShortcut("n", modifiers: [.command])
+                .disabled(viewModel.isExporting || viewModel.isLoadingProject)
                 
                 Button("Open Project...") {
                     viewModel.openProjectPrompt()
                 }
                 .keyboardShortcut("o", modifiers: [.command])
+                .disabled(viewModel.isExporting || viewModel.isLoadingProject)
                 
                 Divider()
                 
@@ -79,13 +101,13 @@ struct MosaicLabApp: App {
                     viewModel.saveProject()
                 }
                 .keyboardShortcut("s", modifiers: [.command])
-                .disabled(viewModel.targetCGImage == nil)
+                .disabled(viewModel.targetCGImage == nil || viewModel.isExporting || viewModel.isLoadingProject)
                 
                 Button("Save Project As...") {
                     viewModel.saveProjectAsPrompt()
                 }
                 .keyboardShortcut("s", modifiers: [.command, .shift])
-                .disabled(viewModel.targetCGImage == nil)
+                .disabled(viewModel.targetCGImage == nil || viewModel.isExporting || viewModel.isLoadingProject)
                 
                 Divider()
                 
@@ -93,7 +115,7 @@ struct MosaicLabApp: App {
                     viewModel.isExportSheetPresented = true
                 }
                 .keyboardShortcut("e", modifiers: [.command])
-                .disabled(!viewModel.hasCompletedTiles)
+                .disabled(!viewModel.hasCompletedTiles || viewModel.isExporting || viewModel.isLoadingProject)
             }
         }
     }

@@ -2,7 +2,7 @@ import Foundation
 import CoreGraphics
 import ImageIO
 
-/// Thread-safe, memory-bounded cache for tile display thumbnails (64px max dimension).
+/// Thread-safe, memory-bounded cache for tile display thumbnails (256px max dimension for Retina sharpness).
 /// Evicts automatically under memory pressure and bounds total RAM footprint.
 public final class MosaicThumbnailCache: @unchecked Sendable {
     public static let shared = MosaicThumbnailCache()
@@ -25,7 +25,7 @@ public final class MosaicThumbnailCache: @unchecked Sendable {
         cache.setObject(image, forKey: key, cost: cost)
     }
     
-    public func thumbnail(for url: URL, maxPixelSize: Int = 64) -> CGImage? {
+    public func thumbnail(for url: URL, maxPixelSize: Int = 256) -> CGImage? {
         let key = url as NSURL
         if let cached = cache.object(forKey: key) {
             return cached
@@ -70,7 +70,7 @@ public final class MosaicThumbnailCache: @unchecked Sendable {
         targetStats: ColorStatistics?,
         colorTransferStrength: Float,
         isMonochrome: Bool = false,
-        maxPixelSize: Int = 64
+        maxPixelSize: Int = 256
     ) -> CGImage? {
         guard let base = thumbnail(for: url, maxPixelSize: maxPixelSize) else {
             return nil
@@ -128,7 +128,7 @@ public final class MosaicThumbnailCache: @unchecked Sendable {
         return transferred
     }
     
-    public func preheatThumbnail(for url: URL, maxPixelSize: Int = 64) {
+    public func preheatThumbnail(for url: URL, maxPixelSize: Int = 256) {
         _ = thumbnail(for: url, maxPixelSize: maxPixelSize)
     }
     
