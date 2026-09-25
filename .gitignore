@@ -1,0 +1,19 @@
+.DS_Store
+*.xcuserdata
+project.xcworkspace
+xcuserdata
+
+# SwiftPM & Builds
+.build/
+.swiftpm/
+build/
+*.app/
+MosaicLab.app/
+
+# Test data & generated files
+test/data/
+test/*.png
+test/*.jpg
+test/*.heic
+*.zip
+!docs/*.png
