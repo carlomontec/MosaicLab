@@ -1,5 +1,7 @@
 import SwiftUI
+#if os(macOS)
 import AppKit
+#endif
 import UniformTypeIdentifiers
 
 public struct TargetImageWell: View {
@@ -9,9 +11,9 @@ public struct TargetImageWell: View {
     
     public var body: some View {
         VStack(spacing: 8) {
-            if let nsImage = viewModel.targetNSImage {
+            if let img = viewModel.targetSwiftUIImage {
                 ZStack(alignment: .topTrailing) {
-                    Image(nsImage: nsImage)
+                    img
                         .resizable()
                         .scaledToFit()
                         .grayscale(viewModel.colorMetric == .monochrome ? 1.0 : 0.0)
@@ -22,7 +24,6 @@ public struct TargetImageWell: View {
                     Button(action: {
                         viewModel.proposeLayoutChange(description: "Clear Target Image") {
                             viewModel.targetImageURL = nil
-                            viewModel.targetNSImage = nil
                             viewModel.targetCGImage = nil
                             viewModel.targetResolutionText = "No image loaded"
                             viewModel.engine = nil
@@ -98,6 +99,7 @@ public struct TargetImageWell: View {
     }
     
     private func selectTargetImage() {
+        #if os(macOS)
         let panel = NSOpenPanel()
         panel.canChooseFiles = true
         panel.canChooseDirectories = false
@@ -121,5 +123,8 @@ public struct TargetImageWell: View {
                 viewModel.setTargetImage(from: url)
             }
         }
+        #else
+        viewModel.isTargetFileImporterPresented = true
+        #endif
     }
 }

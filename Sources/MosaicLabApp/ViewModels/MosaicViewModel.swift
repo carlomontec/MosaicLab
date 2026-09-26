@@ -1,8 +1,13 @@
 import SwiftUI
+#if os(macOS)
 import AppKit
+#else
+import UIKit
+#endif
 import CoreGraphics
 import ImageIO
 import Photos
+import UserNotifications
 import MosaicLabKit
 import UniformTypeIdentifiers
 
@@ -23,9 +28,25 @@ public enum ImageSourceMode: String, CaseIterable, Identifiable {
 public final class MosaicViewModel: ObservableObject {
     // MARK: - Target Image State
     @Published public var targetImageURL: URL?
-    @Published public var targetNSImage: NSImage?
     @Published public var targetCGImage: CGImage?
+    #if os(macOS)
+    @Published public var targetNSImage: NSImage?
+    #endif
     @Published public var targetResolutionText: String = "No image loaded"
+    
+    public var targetSwiftUIImage: Image? {
+        guard let cg = targetCGImage else { return nil }
+        #if os(macOS)
+        return Image(nsImage: NSImage(cgImage: cg, size: NSSize(width: cg.width, height: cg.height)))
+        #else
+        return Image(decorative: cg, scale: 1.0, orientation: .up)
+        #endif
+    }
+    
+    // Platform file picker presentation flags for iOS / iPadOS
+    @Published public var isFolderPickerPresented: Bool = false
+    @Published public var isTargetFileImporterPresented: Bool = false
+    @Published public var isProjectImporterPresented: Bool = false
     
     // MARK: - Settings State
     @Published public var shapeType: MosaicShapeType = .rectangular {
@@ -306,13 +327,10 @@ public final class MosaicViewModel: ObservableObject {
                 resText = "\(loadedW) × \(loadedH) px"
             }
             
-            let nsImage = NSImage(cgImage: cgImage, size: NSSize(width: loadedW, height: loadedH))
-            
             await MainActor.run { [weak self] in
                 guard let self = self else { return }
                 self.targetImageURL = url
                 self.targetCGImage = cgImage
-                self.targetNSImage = nsImage
                 self.targetResolutionText = resText
                 self.statusMessage = "Target image loaded (\(loadedW) × \(loadedH) px)."
                 self.prepareTiles()
@@ -566,20 +584,28 @@ public final class MosaicViewModel: ObservableObject {
         }
     }
     
-    public func imageForTile(_ tile: MosaicTile) -> NSImage? {
+    public func cgImageForTile(_ tile: MosaicTile) -> CGImage? {
         guard let url = tile.bestImageURL else { return nil }
         if url.scheme == "applephotos" {
             if let comps = URLComponents(url: url, resolvingAgainstBaseURL: false),
                let idItem = comps.queryItems?.first(where: { $0.name == "id" })?.value {
-                if let cgImg = ApplePhotosSource.shared.cachedDisplayThumbnail(byIdentifier: idItem, maxPixelSize: 320) {
-                    return NSImage(cgImage: cgImg, size: NSSize(width: cgImg.width, height: cgImg.height))
-                }
+                return ApplePhotosSource.shared.cachedDisplayThumbnail(byIdentifier: idItem, maxPixelSize: 320)
             }
         } else if url.isFileURL {
-            return NSImage(contentsOf: url)
+            let opts: [CFString: Any] = [kCGImageSourceShouldCache: false]
+            if let src = CGImageSourceCreateWithURL(url as CFURL, opts as CFDictionary) {
+                return CGImageSourceCreateImageAtIndex(src, 0, nil)
+            }
         }
         return nil
     }
+    
+    #if os(macOS)
+    public func imageForTile(_ tile: MosaicTile) -> NSImage? {
+        guard let cgImg = cgImageForTile(tile) else { return nil }
+        return NSImage(cgImage: cgImg, size: NSSize(width: cgImg.width, height: cgImg.height))
+    }
+    #endif
     
     // MARK: - Matching Execution
     public func toggleMatching() {
@@ -594,6 +620,10 @@ public final class MosaicViewModel: ObservableObject {
     public func startMatching() {
         guard !isExporting, let engine = self.engine, !candidateItems.isEmpty else { return }
         
+        #if canImport(UserNotifications)
+        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
+        #endif
+        
         self.isRunning = true
         self.isPaused = false
         self.statusMessage = "Matching photos..."
@@ -604,7 +634,10 @@ public final class MosaicViewModel: ObservableObject {
             let total = items.count
             var count = 0
             let loader = ImageLoader()
-            let batchSize = max(8, ProcessInfo.processInfo.activeProcessorCount * 2)
+            let batchSize = max(64, ProcessInfo.processInfo.activeProcessorCount * 8)
+            var lastUIUpdateTime = ContinuousClock.now
+            var lastCanvasUpdateTime = ContinuousClock.now
+            var hadUpdatesSinceLastCanvasRefresh = false
             
             var index = 0
             while index < total {
@@ -654,46 +687,52 @@ public final class MosaicViewModel: ObservableObject {
                 
                 if Task.isCancelled { break }
                 
-                var anyChunkUpdated = false
-                for cand in chunkCandidates {
-                    if Task.isCancelled { break }
-                    let updated = engine.testCandidate(cand)
-                    if updated {
-                        anyChunkUpdated = true
-                        // Pre-heat thumbnail cache in background for smooth rendering
-                        MosaicThumbnailCache.shared.preheatThumbnail(for: cand.url, maxPixelSize: 256)
-                    }
-                }
-                
+                let anyChunkUpdated = engine.testCandidatesBatch(chunkCandidates)
                 if anyChunkUpdated {
-                    await MainActor.run { [weak self] in
-                        self?.canvasVersion += 1
-                    }
+                    hadUpdatesSinceLastCanvasRefresh = true
                 }
                 
                 count = endIndex
                 let currentCount = count
+                let now = ContinuousClock.now
+                let isBatchFinal = (currentCount >= total)
                 
-                // Update UI status at the end of each batch or on completion
-                let matched = engine.tiles.filter { $0.bestImageURL != nil }.count
-                let avgScore: Float
-                if matched > 0 {
-                    let totalScore = engine.tiles.compactMap { $0.bestImageURL != nil ? $0.bestScore : nil }.reduce(0.0, +)
-                    avgScore = totalScore / Float(matched)
-                } else {
-                    avgScore = 1.0
+                // Throttle heavy canvas re-renders to at most once every 1.5 seconds during active matching,
+                // or immediately upon batch completion. This keeps the Main Thread and macOS WindowServer 100% responsive,
+                // completely eliminating beachballing and Dock activation stalls.
+                let shouldRefreshCanvas = isBatchFinal || (hadUpdatesSinceLastCanvasRefresh && (now - lastCanvasUpdateTime >= .milliseconds(1500)))
+                if shouldRefreshCanvas {
+                    hadUpdatesSinceLastCanvasRefresh = false
+                    lastCanvasUpdateTime = now
                 }
-                let pct = Int(Double(currentCount) / Double(total) * 100.0)
-                let status = "Matching: \(currentCount)/\(total) photos (\(pct)%) | \(matched)/\(engine.tiles.count) tiles"
                 
-                await MainActor.run { [weak self] in
-                    guard let self = self else { return }
-                    self.processedImagesCount = currentCount
-                    self.matchedTilesCount = matched
+                // Keep progress bar and status text smooth (~10 Hz / 100ms)
+                if (now - lastUIUpdateTime >= .milliseconds(100)) || isBatchFinal {
+                    lastUIUpdateTime = now
+                    
+                    let matched = engine.tiles.filter { $0.bestImageURL != nil }.count
+                    let avgScore: Float
                     if matched > 0 {
-                        self.averageScore = avgScore
+                        let totalScore = engine.tiles.compactMap { $0.bestImageURL != nil ? $0.bestScore : nil }.reduce(0.0, +)
+                        avgScore = totalScore / Float(matched)
+                    } else {
+                        avgScore = 1.0
                     }
-                    self.statusMessage = status
+                    let pct = Int(Double(currentCount) / Double(total) * 100.0)
+                    let status = "Matching: \(currentCount)/\(total) photos (\(pct)%) | \(matched)/\(engine.tiles.count) tiles"
+                    
+                    await MainActor.run { [weak self] in
+                        guard let self = self else { return }
+                        if shouldRefreshCanvas {
+                            self.canvasVersion += 1
+                        }
+                        self.processedImagesCount = currentCount
+                        self.matchedTilesCount = matched
+                        if matched > 0 {
+                            self.averageScore = avgScore
+                        }
+                        self.statusMessage = status
+                    }
                 }
             }
             
@@ -704,8 +743,30 @@ public final class MosaicViewModel: ObservableObject {
                 self.isRunning = false
                 self.statusMessage = "Completed! Filled \(finalMatched) of \(finalTotal) tiles."
                 self.canvasVersion += 1
+                self.sendCompletionNotification(matched: finalMatched, total: finalTotal)
             }
         }
+    }
+    
+    // MARK: - Notifications
+    private func sendCompletionNotification(matched: Int, total: Int) {
+        #if os(macOS)
+        NSSound(named: "Glass")?.play()
+        #endif
+        
+        #if canImport(UserNotifications)
+        let content = UNMutableNotificationContent()
+        content.title = "Mosaic Ready"
+        content.body = "Mosaic complete! Filled \(matched) of \(total) tiles."
+        content.sound = .default
+        
+        let request = UNNotificationRequest(
+            identifier: "com.carlomontec.mosaiclab.matching-complete-\(UUID().uuidString)",
+            content: content,
+            trigger: nil
+        )
+        UNUserNotificationCenter.current().add(request, withCompletionHandler: nil)
+        #endif
     }
     
     public func pauseMatching() {
@@ -772,12 +833,59 @@ public final class MosaicViewModel: ObservableObject {
     }
     
     // MARK: - Export
-    public func presentSavePanelAndExport(outputWidth: Int, format: String) {
+    public func exportMosaic(outputWidth: Int, format: String, destinationURL: URL) {
         guard !isExporting else {
             statusMessage = "Export already in progress."
             return
         }
         guard let engine = self.engine else { return }
+        
+        self.isExporting = true
+        self.statusMessage = "Exporting \(outputWidth)px mosaic (\(format.uppercased()))..."
+        
+        let tilesCopy = engine.tiles
+        let mosaicSizeCopy = engine.mosaicSize
+        let stroke = Float(self.strokeWidth)
+        let strokeCol = self.strokeColor
+        let isMono = (self.colorMetric == .monochrome)
+        let transfer = Float(self.colorTransferStrength)
+        
+        Task.detached(priority: .userInitiated) {
+            let renderer = MosaicRenderer()
+            do {
+                try renderer.render(
+                    tiles: tilesCopy,
+                    mosaicSize: mosaicSizeCopy,
+                    outputWidth: outputWidth,
+                    strokeWidth: stroke,
+                    strokeColor: strokeCol,
+                    colorTransferStrength: transfer,
+                    isMonochrome: isMono,
+                    outputURL: destinationURL
+                )
+                await MainActor.run {
+                    self.isExporting = false
+                    self.statusMessage = "Export complete: \(destinationURL.lastPathComponent)"
+                    #if os(macOS)
+                    NSWorkspace.shared.activateFileViewerSelecting([destinationURL])
+                    #endif
+                }
+            } catch {
+                await MainActor.run {
+                    self.isExporting = false
+                    self.statusMessage = "Export failed: \(error.localizedDescription)"
+                }
+            }
+        }
+    }
+    
+    #if os(macOS)
+    public func presentSavePanelAndExport(outputWidth: Int, format: String) {
+        guard !isExporting else {
+            statusMessage = "Export already in progress."
+            return
+        }
+        guard self.engine != nil else { return }
         
         let panel = NSSavePanel()
         panel.canCreateDirectories = true
@@ -810,43 +918,10 @@ public final class MosaicViewModel: ObservableObject {
                 finalURL = finalURL.appendingPathExtension(ext)
             }
             
-            self.isExporting = true
-            self.statusMessage = "Exporting \(outputWidth)px mosaic (\(format.uppercased()))..."
-            
-            let tilesCopy = engine.tiles
-            let mosaicSizeCopy = engine.mosaicSize
-            let stroke = Float(self.strokeWidth)
-            let strokeCol = self.strokeColor
-            let isMono = (self.colorMetric == .monochrome)
-            let transfer = Float(self.colorTransferStrength)
-            
-            Task.detached(priority: .userInitiated) {
-                let renderer = MosaicRenderer()
-                do {
-                    try renderer.render(
-                        tiles: tilesCopy,
-                        mosaicSize: mosaicSizeCopy,
-                        outputWidth: outputWidth,
-                        strokeWidth: stroke,
-                        strokeColor: strokeCol,
-                        colorTransferStrength: transfer,
-                        isMonochrome: isMono,
-                        outputURL: finalURL
-                    )
-                    await MainActor.run {
-                        self.isExporting = false
-                        self.statusMessage = "Export complete: \(finalURL.lastPathComponent)"
-                        NSWorkspace.shared.activateFileViewerSelecting([finalURL])
-                    }
-                } catch {
-                    await MainActor.run {
-                        self.isExporting = false
-                        self.statusMessage = "Export failed: \(error.localizedDescription)"
-                    }
-                }
-            }
+            self.exportMosaic(outputWidth: outputWidth, format: format, destinationURL: finalURL)
         }
     }
+    #endif
     
     // MARK: - Layout Change Confirmation & Project Safety
     public func resetMatches() {
@@ -918,7 +993,6 @@ public final class MosaicViewModel: ObservableObject {
         engine = nil
         targetImageURL = nil
         targetCGImage = nil
-        targetNSImage = nil
         targetResolutionText = "No image loaded"
         sourceFolders = []
         foundImageURLs = []
@@ -949,10 +1023,13 @@ public final class MosaicViewModel: ObservableObject {
         if let currentURL = currentProjectURL {
             saveProject(to: currentURL)
         } else {
+            #if os(macOS)
             saveProjectAsPrompt()
+            #endif
         }
     }
     
+    #if os(macOS)
     public func saveProjectAsPrompt(completion: ((Bool) -> Void)? = nil) {
         guard !isExporting, !isLoadingProject else {
             statusMessage = "Cannot save while export or loading is in progress."
@@ -1005,6 +1082,7 @@ public final class MosaicViewModel: ObservableObject {
             completion?(true)
         }
     }
+    #endif
     
     public func saveProject(to destinationURL: URL) {
         guard !isExporting else {
@@ -1135,6 +1213,7 @@ public final class MosaicViewModel: ObservableObject {
             statusMessage = "Cannot open project while an operation is in progress."
             return
         }
+        #if os(macOS)
         let panel = NSOpenPanel()
         panel.canChooseFiles = true
         panel.canChooseDirectories = false
@@ -1153,6 +1232,9 @@ public final class MosaicViewModel: ObservableObject {
         if panel.runModal() == .OK, let url = panel.url {
             openProject(from: url)
         }
+        #else
+        isProjectImporterPresented = true
+        #endif
     }
     
     public func openProject(from projectURL: URL) {
@@ -1352,7 +1434,6 @@ public final class MosaicViewModel: ObservableObject {
                     
                     self.targetImageURL = targetURL
                     self.targetCGImage = cgImage
-                    self.targetNSImage = NSImage(cgImage: cgImage, size: NSSize(width: loadedW, height: loadedH))
                     self.targetResolutionText = "\(loadedW) × \(loadedH) px"
                     
                     self.engine = newEngine

@@ -1,5 +1,7 @@
 import SwiftUI
+#if os(macOS)
 import AppKit
+#endif
 
 public struct ExportSheetView: View {
     @EnvironmentObject private var viewModel: MosaicViewModel
@@ -24,7 +26,11 @@ public struct ExportSheetView: View {
                     Text("Print Poster (6000 px)").tag(6000)
                     Text("Custom...").tag(-1)
                 }
+                #if os(macOS)
                 .pickerStyle(.radioGroup)
+                #else
+                .pickerStyle(.inline)
+                #endif
                 .onChange(of: viewModel.exportPreset) { val in
                     viewModel.exportIsCustom = (val == -1)
                 }
@@ -55,7 +61,11 @@ public struct ExportSheetView: View {
                     Text("PNG (Lossless)").tag("PNG")
                     Text("JPEG (Universal)").tag("JPG")
                 }
+                #if os(macOS)
                 .pickerStyle(.radioGroup)
+                #else
+                .pickerStyle(.inline)
+                #endif
             }
             
             if let error = viewModel.exportErrorMessage {
@@ -85,8 +95,10 @@ public struct ExportSheetView: View {
         let width = viewModel.exportIsCustom ? viewModel.exportCustomWidth : viewModel.exportPreset
         let format = viewModel.exportFormat
         dismiss()
+        #if os(macOS)
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
             viewModel.presentSavePanelAndExport(outputWidth: width, format: format)
         }
+        #endif
     }
 }

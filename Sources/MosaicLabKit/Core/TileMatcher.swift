@@ -194,14 +194,10 @@ public func MosaicCompareEdgeDescriptors(
         return 1.0
     }
     
-    var dot = a.bins.0 * b.bins.0 +
-              a.bins.1 * b.bins.1 +
-              a.bins.2 * b.bins.2 +
-              a.bins.3 * b.bins.3 +
-              a.bins.4 * b.bins.4 +
-              a.bins.5 * b.bins.5 +
-              a.bins.6 * b.bins.6 +
-              a.bins.7 * b.bins.7
+    // ARM NEON vectorized dot product (128-bit SIMD8<Float>)
+    let aVec = SIMD8<Float>(a.bins.0, a.bins.1, a.bins.2, a.bins.3, a.bins.4, a.bins.5, a.bins.6, a.bins.7)
+    let bVec = SIMD8<Float>(b.bins.0, b.bins.1, b.bins.2, b.bins.3, b.bins.4, b.bins.5, b.bins.6, b.bins.7)
+    var dot = (aVec * bVec).sum()
     
     if dot > 1.0 { dot = 1.0 }
     if dot < 0.0 { dot = 0.0 }
@@ -220,57 +216,84 @@ public final class MosaicMatcher: @unchecked Sendable {
         _ targetPixels: UnsafePointer<UInt8>,
         candidatePixels: UnsafePointer<UInt8>,
         maskPixels: UnsafePointer<UInt8>?,
-        width: Int32,
-        height: Int32,
+        totalMaskWeight: Float? = nil,
+        width: Int32 = 16,
+        height: Int32 = 16,
         metric: MosaicColorMetric
     ) -> Float {
         guard width > 0 && height > 0 else { return 1.0 }
         
-        let maxDiff: Float = {
-            switch metric {
-            case .monochrome: return MAX_COLOR_DIFF_MONO
-            case .riemersma: return MAX_COLOR_DIFF_RIEMERSMA
-            case .rgb: return MAX_COLOR_DIFF_RGB
-            }
-        }()
+        let maxDiff: Float
+        switch metric {
+        case .monochrome: maxDiff = MAX_COLOR_DIFF_MONO
+        case .riemersma: maxDiff = MAX_COLOR_DIFF_RIEMERSMA
+        case .rgb: maxDiff = MAX_COLOR_DIFF_RGB
+        }
         
         var accumulatedSimilarity: Float = 0.0
-        var totalPixelWeight: Float = 0.0
+        var totalPixelWeight: Float = totalMaskWeight ?? 0.0
         let totalPixels = Int(width * height)
+        let maskMultiplier: Float = 1.0 / 255.0
+        let needAccumulateWeight = (totalMaskWeight == nil)
         
-        for i in 0..<totalPixels {
-            var weight: Float = 1.0
-            if let mask = maskPixels {
-                weight = Float(mask[i]) / 255.0
-                if weight <= 0.001 {
-                    continue
+        switch metric {
+        case .rgb:
+            for i in 0..<totalPixels {
+                var weight: Float = 1.0
+                if let mask = maskPixels {
+                    let maskVal = mask[i]
+                    if maskVal == 0 { continue }
+                    weight = Float(maskVal) * maskMultiplier
+                }
+                let offset = i &* 4
+                let rd = Int32(targetPixels[offset]) - Int32(candidatePixels[offset])
+                let gd = Int32(targetPixels[offset &+ 1]) - Int32(candidatePixels[offset &+ 1])
+                let bd = Int32(targetPixels[offset &+ 2]) - Int32(candidatePixels[offset &+ 2])
+                let diff = Float(rd * rd + gd * gd + bd * bd)
+                let similarity = maxDiff - diff
+                accumulatedSimilarity += (similarity > 0 ? similarity : 0) * weight
+                if needAccumulateWeight {
+                    totalPixelWeight += weight
                 }
             }
-            
-            let offset = i * 4
-            let tr = targetPixels[offset]
-            let tg = targetPixels[offset + 1]
-            let tb = targetPixels[offset + 2]
-            
-            let cr = candidatePixels[offset]
-            let cg = candidatePixels[offset + 1]
-            let cb = candidatePixels[offset + 2]
-            
-            let diff: Float
-            switch metric {
-            case .monochrome:
-                diff = colorDifferenceMono(tr, tg, tb, cr, cg, cb)
-            case .riemersma:
-                diff = colorDifferenceRiemersma(tr, tg, tb, cr, cg, cb)
-            case .rgb:
-                diff = colorDifferenceRGB(tr, tg, tb, cr, cg, cb)
+        case .riemersma:
+            for i in 0..<totalPixels {
+                var weight: Float = 1.0
+                if let mask = maskPixels {
+                    let maskVal = mask[i]
+                    if maskVal == 0 { continue }
+                    weight = Float(maskVal) * maskMultiplier
+                }
+                let offset = i &* 4
+                let diff = colorDifferenceRiemersma(
+                    targetPixels[offset], targetPixels[offset &+ 1], targetPixels[offset &+ 2],
+                    candidatePixels[offset], candidatePixels[offset &+ 1], candidatePixels[offset &+ 2]
+                )
+                let similarity = maxDiff - diff
+                accumulatedSimilarity += (similarity > 0 ? similarity : 0) * weight
+                if needAccumulateWeight {
+                    totalPixelWeight += weight
+                }
             }
-            
-            var similarity = maxDiff - diff
-            if similarity < 0.0 { similarity = 0.0 }
-            
-            accumulatedSimilarity += similarity * weight
-            totalPixelWeight += weight
+        case .monochrome:
+            for i in 0..<totalPixels {
+                var weight: Float = 1.0
+                if let mask = maskPixels {
+                    let maskVal = mask[i]
+                    if maskVal == 0 { continue }
+                    weight = Float(maskVal) * maskMultiplier
+                }
+                let offset = i &* 4
+                let diff = colorDifferenceMono(
+                    targetPixels[offset], targetPixels[offset &+ 1], targetPixels[offset &+ 2],
+                    candidatePixels[offset], candidatePixels[offset &+ 1], candidatePixels[offset &+ 2]
+                )
+                let similarity = maxDiff - diff
+                accumulatedSimilarity += (similarity > 0 ? similarity : 0) * weight
+                if needAccumulateWeight {
+                    totalPixelWeight += weight
+                }
+            }
         }
         
         if totalPixelWeight <= 0.0001 {
@@ -289,8 +312,9 @@ public final class MosaicMatcher: @unchecked Sendable {
         candidatePixels: UnsafePointer<UInt8>,
         candidateEdgeDesc: MosaicEdgeDescriptor,
         maskPixels: UnsafePointer<UInt8>?,
-        width: Int32,
-        height: Int32,
+        totalMaskWeight: Float? = nil,
+        width: Int32 = 16,
+        height: Int32 = 16,
         metric: MosaicColorMetric,
         edgeWeight: Float
     ) -> Float {
@@ -298,6 +322,7 @@ public final class MosaicMatcher: @unchecked Sendable {
             targetPixels,
             candidatePixels: candidatePixels,
             maskPixels: maskPixels,
+            totalMaskWeight: totalMaskWeight,
             width: width,
             height: height,
             metric: metric

@@ -100,7 +100,7 @@ public struct ColorTransferInfoView: View {
                     }
                 }
                 .padding(8)
-                .background(Color(NSColor.controlBackgroundColor).opacity(0.6))
+                .background(Color.platformControlBackground.opacity(0.6))
                 .cornerRadius(6)
             }
             

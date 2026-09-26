@@ -1,5 +1,7 @@
 import SwiftUI
+#if os(macOS)
 import AppKit
+#endif
 import UniformTypeIdentifiers
 import MosaicLabKit
 
@@ -22,8 +24,8 @@ public struct TileDetailPopover: View {
             }
             
             if let imageURL = tile.bestImageURL {
-                if let nsImg = viewModel.imageForTile(tile) {
-                    Image(nsImage: nsImg)
+                if let cgImg = viewModel.cgImageForTile(tile) {
+                    Image(decorative: cgImg, scale: 1.0, orientation: .up)
                         .resizable()
                         .scaledToFit()
                         .grayscale(viewModel.colorMetric == .monochrome ? 1.0 : 0.0)
@@ -120,6 +122,7 @@ public struct TileDetailPopover: View {
     }
     
     private func chooseManualPhoto() {
+        #if os(macOS)
         let panel = NSOpenPanel()
         panel.canChooseFiles = true
         panel.canChooseDirectories = false
@@ -134,5 +137,6 @@ public struct TileDetailPopover: View {
         if panel.runModal() == .OK, let selectedURL = panel.url {
             viewModel.manuallySubstitute(tile: tile, imageURL: selectedURL)
         }
+        #endif
     }
 }

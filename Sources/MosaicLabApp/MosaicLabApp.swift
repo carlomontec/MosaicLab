@@ -1,12 +1,26 @@
 import SwiftUI
+#if os(macOS)
 import AppKit
+import UserNotifications
 
 @MainActor
-final class MosaicLabAppDelegate: NSObject, NSApplicationDelegate {
+final class MosaicLabAppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDelegate {
     weak var viewModel: MosaicViewModel?
     private var pendingOpenURL: URL?
     private var lastHandledURL: URL?
     private var lastHandledTime: TimeInterval = 0
+    
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        UNUserNotificationCenter.current().delegate = self
+    }
+    
+    nonisolated func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        willPresent notification: UNNotification,
+        withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
+    ) {
+        completionHandler([.banner, .sound])
+    }
     
     func setViewModel(_ vm: MosaicViewModel) {
         self.viewModel = vm
@@ -51,16 +65,21 @@ final class MosaicLabAppDelegate: NSObject, NSApplicationDelegate {
                 window.makeKeyAndOrderFront(nil)
             }
         }
+        sender.activate(ignoringOtherApps: true)
         return true
     }
 }
+#endif
 
 @main
 struct MosaicLabApp: App {
+    #if os(macOS)
     @NSApplicationDelegateAdaptor(MosaicLabAppDelegate.self) private var appDelegate
+    #endif
     @StateObject private var viewModel = MosaicViewModel()
     
     var body: some Scene {
+        #if os(macOS)
         Window("MosaicLab", id: "main") {
             MainWindowView()
                 .environmentObject(viewModel)
@@ -118,5 +137,15 @@ struct MosaicLabApp: App {
                 .disabled(!viewModel.hasCompletedTiles || viewModel.isExporting || viewModel.isLoadingProject)
             }
         }
+        #else
+        WindowGroup {
+            MainWindowView()
+                .environmentObject(viewModel)
+                .navigationTitle(viewModel.currentProjectURL?.lastPathComponent ?? "MosaicLab")
+                .onOpenURL { url in
+                    viewModel.openProject(from: url)
+                }
+        }
+        #endif
     }
 }

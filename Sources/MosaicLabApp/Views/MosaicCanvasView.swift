@@ -1,5 +1,9 @@
 import SwiftUI
+#if os(macOS)
 import AppKit
+#else
+import UIKit
+#endif
 import CoreGraphics
 import ImageIO
 import MosaicLabKit
@@ -12,7 +16,7 @@ public struct MosaicCanvasView: View {
     public var body: some View {
         GeometryReader { geometry in
             ZStack {
-                Color(NSColor.underPageBackgroundColor)
+                Color.platformCanvasBackground
                     .edgesIgnoringSafeArea(.all)
                 
                 if viewModel.targetCGImage != nil {
@@ -231,6 +235,7 @@ public struct MosaicCanvasView: View {
     }
 }
 
+#if os(macOS)
 private struct MosaicRepresentable: NSViewRepresentable {
     let canvasVersion: Int
     let engine: MosaicEngine?
@@ -496,3 +501,239 @@ private final class NSMosaicView: NSView {
         context.restoreGState()
     }
 }
+#else
+private struct MosaicRepresentable: UIViewRepresentable {
+    let canvasVersion: Int
+    let engine: MosaicEngine?
+    let targetImage: CGImage?
+    let blendOpacity: Double
+    let strokeWidth: Double
+    let strokeColor: String
+    let colorTransferStrength: Double
+    let isMonochrome: Bool
+    let onTileTapped: (MosaicTile) -> Void
+    let onPan: (CGSize) -> Void
+    let onMagnify: (CGFloat) -> Void
+    
+    func makeUIView(context: Context) -> UIMosaicView {
+        let view = UIMosaicView()
+        view.onTileTapped = onTileTapped
+        view.onPan = onPan
+        view.onMagnify = onMagnify
+        return view
+    }
+    
+    func updateUIView(_ uiView: UIMosaicView, context: Context) {
+        uiView.canvasVersion = canvasVersion
+        uiView.engine = engine
+        uiView.targetImage = targetImage
+        uiView.blendOpacity = blendOpacity
+        uiView.strokeWidth = strokeWidth
+        uiView.strokeColor = strokeColor
+        uiView.colorTransferStrength = colorTransferStrength
+        uiView.isMonochrome = isMonochrome
+        uiView.onTileTapped = onTileTapped
+        uiView.onPan = onPan
+        uiView.onMagnify = onMagnify
+        uiView.setNeedsDisplay()
+    }
+}
+
+private final class UIMosaicView: UIView {
+    var canvasVersion: Int = 0
+    var engine: MosaicEngine?
+    var targetImage: CGImage?
+    var blendOpacity: Double = 0.0
+    var strokeWidth: Double = 0.5
+    var strokeColor: String = "black"
+    var colorTransferStrength: Double = 0.0
+    var isMonochrome: Bool = false
+    var onTileTapped: ((MosaicTile) -> Void)?
+    var onPan: ((CGSize) -> Void)?
+    var onMagnify: ((CGFloat) -> Void)?
+    
+    private var cachedMosaicImage: CGImage?
+    private var cachedCanvasVersion: Int = -1
+    private var cachedIsMonochrome: Bool = false
+    private var cachedQuantizedTransfer: Int = -1
+    private var cachedStrokeWidth: Double = -1.0
+    private var cachedStrokeColor: String = ""
+    private var cachedWidth: Int = -1
+    private var cachedHeight: Int = -1
+    private var cachedTilesCount: Int = -1
+    
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        backgroundColor = .clear
+        let tapGesture = UITapGestureRecognizer(target: self, action: #selector(handleTap(_:)))
+        addGestureRecognizer(tapGesture)
+    }
+    
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+    
+    @objc private func handleTap(_ gesture: UITapGestureRecognizer) {
+        guard let engine = self.engine else { return }
+        let location = gesture.location(in: self)
+        let mSize = engine.mosaicSize
+        guard mSize.width > 0, mSize.height > 0 else { return }
+        let scale = min(bounds.width / mSize.width, bounds.height / mSize.height)
+        let drawOriginX = (bounds.width - mSize.width * scale) / 2.0
+        let drawOriginY = (bounds.height - mSize.height * scale) / 2.0
+        
+        let mosaicPoint = CGPoint(
+            x: (location.x - drawOriginX) / scale,
+            y: (location.y - drawOriginY) / scale
+        )
+        for tile in engine.tiles {
+            if tile.geometry.outline.contains(mosaicPoint) {
+                onTileTapped?(tile)
+                return
+            }
+        }
+    }
+    
+    private func drawUprightImage(_ image: CGImage, in rect: CGRect, in context: CGContext) {
+        context.saveGState()
+        context.translateBy(x: rect.minX, y: rect.maxY)
+        context.scaleBy(x: 1.0, y: -1.0)
+        context.draw(image, in: CGRect(x: 0, y: 0, width: rect.width, height: rect.height))
+        context.restoreGState()
+    }
+    
+    private func getOrRebuildMosaicImage(engine: MosaicEngine, target: CGImage, displayScale: CGFloat) -> CGImage? {
+        let mSize = engine.mosaicSize
+        let width = Int(mSize.width)
+        let height = Int(mSize.height)
+        guard width > 0, height > 0 else { return nil }
+        
+        let quantizedTransfer = Int(round(colorTransferStrength * 20.0)) * 5
+        let currentTilesCount = engine.tiles.count
+        let isMono = self.isMonochrome || (engine.metric == .monochrome)
+        
+        if let cached = cachedMosaicImage,
+           cachedCanvasVersion == self.canvasVersion,
+           cachedIsMonochrome == isMono,
+           cachedQuantizedTransfer == quantizedTransfer,
+           abs(cachedStrokeWidth - self.strokeWidth) < 0.001,
+           cachedStrokeColor == self.strokeColor,
+           cachedWidth == width,
+           cachedHeight == height,
+           cachedTilesCount == currentTilesCount {
+            return cached
+        }
+        
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        let bitmapInfo = CGBitmapInfo.byteOrder32Big.rawValue | CGImageAlphaInfo.premultipliedLast.rawValue
+        guard let ctx = CGContext(
+            data: nil,
+            width: width,
+            height: height,
+            bitsPerComponent: 8,
+            bytesPerRow: width * 4,
+            space: colorSpace,
+            bitmapInfo: bitmapInfo
+        ) else { return nil }
+        
+        ctx.interpolationQuality = .high
+        ctx.translateBy(x: 0, y: CGFloat(height))
+        ctx.scaleBy(x: 1.0, y: -1.0)
+        
+        let transferStrength = Float(colorTransferStrength)
+        let strokeW = CGFloat(strokeWidth)
+        let strokeLineWidth = (displayScale > 0.0) ? strokeW / displayScale : strokeW
+        let displayTarget = isMono ? ColorTransfer.convertToMonochrome(target) : target
+        
+        let hasUnmatchedTiles = engine.tiles.contains { $0.bestImageURL == nil }
+        if hasUnmatchedTiles {
+            drawUprightImage(displayTarget, in: CGRect(origin: .zero, size: mSize), in: ctx)
+            ctx.setFillColor(CGColor(red: 0, green: 0, blue: 0, alpha: 0.35))
+            ctx.fill(CGRect(origin: .zero, size: mSize))
+        }
+        
+        for tile in engine.tiles {
+            if let imageURL = tile.bestImageURL {
+                ctx.saveGState()
+                ctx.addPath(tile.geometry.outline)
+                ctx.clip()
+                
+                let targetStats = (transferStrength > 0.001) ? tile.targetColorStatistics : nil
+                if let cgImg = MosaicThumbnailCache.shared.thumbnail(
+                    for: imageURL,
+                    targetStats: targetStats,
+                    colorTransferStrength: transferStrength,
+                    isMonochrome: isMono
+                ) {
+                    let b = tile.geometry.bounds
+                    let imgW = CGFloat(cgImg.width)
+                    let imgH = CGFloat(cgImg.height)
+                    let fillScale = max(b.width / imgW, b.height / imgH)
+                    let drawW = imgW * fillScale
+                    let drawH = imgH * fillScale
+                    let drawX = b.midX - drawW / 2.0
+                    let drawY = b.midY - drawH / 2.0
+                    drawUprightImage(cgImg, in: CGRect(x: drawX, y: drawY, width: drawW, height: drawH), in: ctx)
+                }
+                ctx.restoreGState()
+            }
+            
+            if strokeW > 0.01 {
+                ctx.saveGState()
+                let strokeCol = (self.strokeColor == "white") ?
+                    CGColor(red: 1, green: 1, blue: 1, alpha: 0.6) :
+                    CGColor(red: 0, green: 0, blue: 0, alpha: 0.35)
+                ctx.setStrokeColor(strokeCol)
+                ctx.setLineWidth(strokeLineWidth)
+                ctx.addPath(tile.geometry.outline)
+                ctx.strokePath()
+                ctx.restoreGState()
+            }
+        }
+        
+        guard let newImage = ctx.makeImage() else { return nil }
+        self.cachedMosaicImage = newImage
+        self.cachedCanvasVersion = self.canvasVersion
+        self.cachedIsMonochrome = isMono
+        self.cachedQuantizedTransfer = quantizedTransfer
+        self.cachedStrokeWidth = self.strokeWidth
+        self.cachedStrokeColor = self.strokeColor
+        self.cachedWidth = width
+        self.cachedHeight = height
+        self.cachedTilesCount = currentTilesCount
+        return newImage
+    }
+    
+    override func draw(_ rect: CGRect) {
+        guard let context = UIGraphicsGetCurrentContext(),
+              let engine = self.engine,
+              let target = self.targetImage else { return }
+        
+        let mSize = engine.mosaicSize
+        guard mSize.width > 0, mSize.height > 0 else { return }
+        
+        let scale = min(bounds.width / mSize.width, bounds.height / mSize.height)
+        let drawOriginX = (bounds.width - mSize.width * scale) / 2.0
+        let drawOriginY = (bounds.height - mSize.height * scale) / 2.0
+        
+        guard let mosaicImage = getOrRebuildMosaicImage(engine: engine, target: target, displayScale: scale) else { return }
+        
+        context.saveGState()
+        context.translateBy(x: drawOriginX, y: drawOriginY)
+        context.scaleBy(x: scale, y: scale)
+        
+        drawUprightImage(mosaicImage, in: CGRect(origin: .zero, size: mSize), in: context)
+        
+        if blendOpacity > 0.01 {
+            context.saveGState()
+            context.setAlpha(CGFloat(blendOpacity))
+            let isMono = self.isMonochrome || (engine.metric == .monochrome)
+            let blendTarget = isMono ? ColorTransfer.convertToMonochrome(target) : target
+            drawUprightImage(blendTarget, in: CGRect(origin: .zero, size: mSize), in: context)
+            context.restoreGState()
+        }
+        
+        context.restoreGState()
+    }
+}
+#endif

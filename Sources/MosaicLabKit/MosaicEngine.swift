@@ -2,6 +2,20 @@ import Foundation
 import CoreGraphics
 import ImageIO
 
+/// Immutable pre-rasterized tile snippet representation for thread-safe concurrent evaluation
+public struct PreparedTile: Sendable {
+    public let tileIndex: Int
+    public let targetBytes: [UInt8]
+    public let maskBytes: [UInt8]
+    public let totalWeight: Float
+    public let edgeDescriptor: MosaicEdgeDescriptor
+    public let meanR: Float
+    public let meanG: Float
+    public let meanB: Float
+    public let gridX: Int
+    public let gridY: Int
+}
+
 public final class MosaicEngine: @unchecked Sendable {
     public let shapeType: MosaicShapeType
     public let tilesAcross: Int
@@ -11,6 +25,7 @@ public final class MosaicEngine: @unchecked Sendable {
     public var metric: MosaicColorMetric
     
     public private(set) var tiles: [MosaicTile] = []
+    private var preparedTiles: [PreparedTile] = []
     public private(set) var mosaicSize: CGSize = .zero
     public private(set) var targetImage: CGImage?
     
@@ -19,6 +34,11 @@ public final class MosaicEngine: @unchecked Sendable {
     /// Enables instantaneous (<10ms) single-tile recomputation.
     public private(set) var candidateStore: [String: SourceImageCandidate] = [:]
     private let candidateStoreLock = NSLock()
+    
+    /// O(1) tracking of image assignment counts to prevent expensive full-tile array scans
+    private var candidateUsageCounts: [String: Int] = [:]
+    /// O(K) spatial location tracking: maps candidate identifier to set of assigned tile indices
+    private var candidateTileLocations: [String: Set<Int>] = [:]
     
     public var isCancelled: Bool = false
     public var isPaused: Bool = false
@@ -151,6 +171,20 @@ public final class MosaicEngine: @unchecked Sendable {
         }
         
         self.tiles = tileArray
+        self.preparedTiles = tileArray.enumerated().map { (idx, tile) in
+            PreparedTile(
+                tileIndex: idx,
+                targetBytes: tile.targetBuffer,
+                maskBytes: tile.maskBuffer,
+                totalWeight: tile.totalPixelWeight,
+                edgeDescriptor: tile.edgeDescriptor,
+                meanR: tile.meanR,
+                meanG: tile.meanG,
+                meanB: tile.meanB,
+                gridX: tile.geometry.gridX,
+                gridY: tile.geometry.gridY
+            )
+        }
         progressHandler?(1.0, "Generated \(totalCount) tile shapes.")
     }
     
@@ -161,101 +195,184 @@ public final class MosaicEngine: @unchecked Sendable {
             tile.bestImageIdentifier = nil
             tile.bestScore = 1.0
         }
+        candidateUsageCounts.removeAll(keepingCapacity: true)
+        candidateTileLocations.removeAll(keepingCapacity: true)
         candidateStoreLock.lock()
         candidateStore.removeAll()
         candidateStoreLock.unlock()
     }
     
-    /// Processes an image candidate and tests it against all tiles. Returns true if any tile was updated.
+    /// Evaluates a batch of candidate images concurrently across all CPU cores.
+    /// Returns true if any tile was updated with a new best match.
     @discardableResult
-    public func testCandidate(_ candidate: SourceImageCandidate) -> Bool {
-        if isCancelled { return false }
+    public func testCandidatesBatch(_ candidates: [SourceImageCandidate]) -> Bool {
+        if isCancelled || candidates.isEmpty { return false }
         
-        registerCandidate(candidate)
+        for cand in candidates {
+            registerCandidate(cand)
+        }
+        
+        if self.preparedTiles.isEmpty && !self.tiles.isEmpty {
+            self.preparedTiles = self.tiles.enumerated().map { (idx, tile) in
+                PreparedTile(
+                    tileIndex: idx,
+                    targetBytes: tile.targetBuffer,
+                    maskBytes: tile.maskBuffer,
+                    totalWeight: tile.totalPixelWeight,
+                    edgeDescriptor: tile.edgeDescriptor,
+                    meanR: tile.meanR,
+                    meanG: tile.meanG,
+                    meanB: tile.meanB,
+                    gridX: tile.geometry.gridX,
+                    gridY: tile.geometry.gridY
+                )
+            }
+        }
+        
+        let pTiles = self.preparedTiles
+        let pTileCount = pTiles.count
+        guard pTileCount > 0 else { return false }
+        
+        struct CandidateMatch {
+            let tileIndex: Int
+            let candidateIndex: Int
+            let score: Float
+        }
         
         let matcher = MosaicMatcher.shared()
-        let candidatePixels = (candidate.thumbnailPixels as NSData).bytes.assumingMemoryBound(to: UInt8.self)
+        let metric = self.metric
+        let edgeWeight = self.edgeWeight
+        let candidatesCount = candidates.count
         
-        // 1. Calculate scores for all tiles
-        var candidateScores: [(tileIndex: Int, score: Float)] = []
-        candidateScores.reserveCapacity(tiles.count)
+        var allMatches: [CandidateMatch] = []
+        let matchLock = NSLock()
         
-        for (idx, tile) in tiles.enumerated() {
-            guard let targetData = tile.targetPixels, let maskData = tile.maskPixels else {
-                continue
-            }
-            let targetBytes = (targetData as NSData).bytes.assumingMemoryBound(to: UInt8.self)
-            let maskBytes = (maskData as NSData).bytes.assumingMemoryBound(to: UInt8.self)
+        // Concurrent evaluation across all CPU cores (Multi-Core dispatch)
+        DispatchQueue.concurrentPerform(iterations: candidatesCount) { cIdx in
+            let cand = candidates[cIdx]
             
-            let score = matcher.compareTargetPixels(
-                targetBytes,
-                targetEdgeDesc: tile.edgeDescriptor,
-                candidatePixels: candidatePixels,
-                candidateEdgeDesc: candidate.edgeDescriptor,
-                maskPixels: maskBytes,
-                width: 16,
-                height: 16,
-                metric: metric,
-                edgeWeight: edgeWeight
-            )
-            
-            // Only consider if it beats the current best match
-            if score < tile.bestScore {
-                candidateScores.append((tileIndex: idx, score: score))
+            cand.thumbnailPixels.withUnsafeBytes { candRawBuffer in
+                guard let candBytes = candRawBuffer.baseAddress?.assumingMemoryBound(to: UInt8.self) else { return }
+                
+                var localMatches: [CandidateMatch] = []
+                localMatches.reserveCapacity(32)
+                
+                for tIdx in 0..<pTileCount {
+                    let pTile = pTiles[tIdx]
+                    let currentBest = self.tiles[pTile.tileIndex].bestScore
+                    
+                    // Hierarchical early rejection:
+                    // If the mean RGB distance is already >= currentBest, skip full evaluation!
+                    if edgeWeight <= 0.001 && metric == .rgb {
+                        let dR = pTile.meanR - cand.meanR
+                        let dG = pTile.meanG - cand.meanG
+                        let dB = pTile.meanB - cand.meanB
+                        let meanDistSq = dR * dR + dG * dG + dB * dB
+                        let minBoundScore = meanDistSq * (1.0 / (255.0 * 255.0 * 3.0))
+                        if minBoundScore >= currentBest {
+                            continue // Mathematically cannot beat currentBest!
+                        }
+                    }
+                    
+                    pTile.targetBytes.withUnsafeBufferPointer { tBuf in
+                        pTile.maskBytes.withUnsafeBufferPointer { mBuf in
+                            guard let targetBytes = tBuf.baseAddress,
+                                  let maskBytes = mBuf.baseAddress else { return }
+                            
+                            let score = matcher.compareTargetPixels(
+                                targetBytes,
+                                targetEdgeDesc: pTile.edgeDescriptor,
+                                candidatePixels: candBytes,
+                                candidateEdgeDesc: cand.edgeDescriptor,
+                                maskPixels: maskBytes,
+                                totalMaskWeight: pTile.totalWeight,
+                                width: 16,
+                                height: 16,
+                                metric: metric,
+                                edgeWeight: edgeWeight
+                            )
+                            
+                            if score < currentBest {
+                                localMatches.append(CandidateMatch(tileIndex: pTile.tileIndex, candidateIndex: cIdx, score: score))
+                            }
+                        }
+                    }
+                }
+                
+                if !localMatches.isEmpty {
+                    matchLock.lock()
+                    allMatches.append(contentsOf: localMatches)
+                    matchLock.unlock()
+                }
             }
         }
         
-        if candidateScores.isEmpty {
-            return false
-        }
+        if allMatches.isEmpty { return false }
         
         // Sort candidate matches best first (lowest score = best)
-        candidateScores.sort { $0.score < $1.score }
+        allMatches.sort { $0.score < $1.score }
         
         var anyUpdated = false
+        let minDistSq = minDistance * minDistance
         
-        // 2. Assign to tiles respecting constraints
-        for match in candidateScores {
+        for match in allMatches {
             let tile = tiles[match.tileIndex]
+            if match.score >= tile.bestScore {
+                continue // Already improved by an earlier match in this batch
+            }
             
-            // Check reuse count
+            let cand = candidates[match.candidateIndex]
+            
+            // Check reuse count in O(1)
             if maxReuse > 0 {
-                let currentUses = tiles.reduce(0) { count, t in
-                    (t.bestImageIdentifier == candidate.identifier) ? count + 1 : count
-                }
+                let currentUses = candidateUsageCounts[cand.identifier] ?? 0
                 if currentUses >= maxReuse {
-                    break // Cannot reuse this image anymore
+                    continue
                 }
             }
             
-            // Check minimum distance constraint
-            if minDistance > 0 {
+            // Check minimum distance constraint in O(K)
+            if minDistance > 0, let assignedTileIndices = candidateTileLocations[cand.identifier] {
                 let gx = tile.geometry.gridX
                 let gy = tile.geometry.gridY
-                
-                let tooClose = tiles.contains { otherTile in
-                    guard otherTile.bestImageIdentifier == candidate.identifier else { return false }
+                var tooClose = false
+                for otherIdx in assignedTileIndices {
+                    let otherTile = tiles[otherIdx]
                     let dx = otherTile.geometry.gridX - gx
                     let dy = otherTile.geometry.gridY - gy
-                    let distSquared = dx * dx + dy * dy
-                    return distSquared < (self.minDistance * self.minDistance)
+                    if (dx * dx + dy * dy) < minDistSq {
+                        tooClose = true
+                        break
+                    }
                 }
-                
-                if tooClose {
-                    continue // Try next best tile
-                }
+                if tooClose { continue }
             }
             
             // Update tile match
+            if let oldID = tile.bestImageIdentifier {
+                candidateUsageCounts[oldID, default: 1] -= 1
+                candidateTileLocations[oldID]?.remove(match.tileIndex)
+            }
             tile.bestScore = match.score
-            tile.bestImageIdentifier = candidate.identifier
-            tile.bestImageURL = candidate.url
-            anyUpdated = true
+            tile.bestImageIdentifier = cand.identifier
+            tile.bestImageURL = cand.url
+            candidateUsageCounts[cand.identifier, default: 0] += 1
+            if candidateTileLocations[cand.identifier] == nil {
+                candidateTileLocations[cand.identifier] = []
+            }
+            candidateTileLocations[cand.identifier]?.insert(match.tileIndex)
             
+            anyUpdated = true
             onTileUpdated?(match.tileIndex)
         }
         
         return anyUpdated
+    }
+    
+    /// Processes an image candidate and tests it against all tiles. Returns true if any tile was updated.
+    @discardableResult
+    public func testCandidate(_ candidate: SourceImageCandidate) -> Bool {
+        return testCandidatesBatch([candidate])
     }
     
     public func registerCandidate(_ candidate: SourceImageCandidate) {

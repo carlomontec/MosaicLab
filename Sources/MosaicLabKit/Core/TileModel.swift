@@ -5,6 +5,12 @@ public final class MosaicTile: @unchecked Sendable {
     public let geometry: MosaicTileGeometry
     public private(set) var targetPixels: Data?
     public private(set) var maskPixels: Data?
+    public private(set) var targetBuffer: [UInt8] = []
+    public private(set) var maskBuffer: [UInt8] = []
+    public private(set) var totalPixelWeight: Float = 256.0
+    public private(set) var meanR: Float = 0.0
+    public private(set) var meanG: Float = 0.0
+    public private(set) var meanB: Float = 0.0
     public private(set) var edgeDescriptor: MosaicEdgeDescriptor
     
     public var bestScore: Float = 1.0
@@ -85,7 +91,24 @@ public final class MosaicTile: @unchecked Sendable {
             context.draw(targetImage, in: CGRect(x: 0, y: 0, width: size, height: size))
         }
         
+        self.targetBuffer = buffer
         self.targetPixels = Data(buffer)
+        
+        var sumR: Float = 0.0
+        var sumG: Float = 0.0
+        var sumB: Float = 0.0
+        let total = size * size
+        for i in 0..<total {
+            let offset = i * 4
+            sumR += Float(buffer[offset])
+            sumG += Float(buffer[offset + 1])
+            sumB += Float(buffer[offset + 2])
+        }
+        let invTotal = 1.0 / Float(total)
+        self.meanR = sumR * invTotal
+        self.meanG = sumG * invTotal
+        self.meanB = sumB * invTotal
+        
         buffer.withUnsafeBufferPointer { ptr in
             if let baseAddress = ptr.baseAddress {
                 self.edgeDescriptor = MacOSaiXComputeEdgeDescriptor(rgba: baseAddress, width: size, height: size)
@@ -127,7 +150,18 @@ public final class MosaicTile: @unchecked Sendable {
             context.fillPath()
         }
         
+        self.maskBuffer = buffer
         self.maskPixels = Data(buffer)
+        
+        var totalW: Float = 0.0
+        let maskMultiplier: Float = 1.0 / 255.0
+        for i in 0..<(size * size) {
+            let m = buffer[i]
+            if m > 0 {
+                totalW += Float(m) * maskMultiplier
+            }
+        }
+        self.totalPixelWeight = totalW > 0.0001 ? totalW : 1.0
     }
 }
 

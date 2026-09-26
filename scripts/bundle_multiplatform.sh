@@ -4,32 +4,24 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PACKAGE_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-echo "==> Building MosaicLabApp in release mode..."
+echo "==> Building MosaicLabApp in release mode for multiplatform branch..."
 cd "$PACKAGE_DIR"
-swift build -c release
+swift build -c release --build-path .build-multiplatform
 
-APP_BASE_NAME="${1:-MosaicLab}"
-APP_NAME="${APP_BASE_NAME}.app"
+APP_NAME="MosaicLab-Multiplatform.app"
 APP_DIR="$PACKAGE_DIR/build/$APP_NAME"
 CONTENTS_DIR="$APP_DIR/Contents"
 MACOS_DIR="$CONTENTS_DIR/MacOS"
 RESOURCES_DIR="$CONTENTS_DIR/Resources"
 
-BUNDLE_ID="com.carlomontec.mosaiclab"
-DISPLAY_NAME="$APP_BASE_NAME"
-if [ "$APP_BASE_NAME" != "MosaicLab" ]; then
-    CLEAN_SUFFIX=$(echo "$APP_BASE_NAME" | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z0-9')
-    BUNDLE_ID="com.carlomontec.mosaiclab.${CLEAN_SUFFIX}"
-fi
-
-echo "==> Preparing $APP_NAME bundle structure ($BUNDLE_ID)..."
+echo "==> Preparing $APP_NAME bundle structure..."
 rm -rf "$APP_DIR"
 mkdir -p "$MACOS_DIR"
 mkdir -p "$RESOURCES_DIR"
 
 # Copy binary
 echo "==> Copying binary..."
-cp "$PACKAGE_DIR/.build/release/MosaicLabApp" "$MACOS_DIR/MosaicLab"
+cp "$PACKAGE_DIR/.build-multiplatform/release/MosaicLabApp" "$MACOS_DIR/MosaicLab"
 chmod +x "$MACOS_DIR/MosaicLab"
 
 # Copy Icon if available
@@ -41,7 +33,7 @@ fi
 
 # Write Info.plist
 echo "==> Generating Info.plist..."
-cat << EOF > "$CONTENTS_DIR/Info.plist"
+cat << 'EOF' > "$CONTENTS_DIR/Info.plist"
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -53,17 +45,17 @@ cat << EOF > "$CONTENTS_DIR/Info.plist"
     <key>CFBundleIconFile</key>
     <string>AppIcon</string>
     <key>CFBundleIdentifier</key>
-    <string>$BUNDLE_ID</string>
+    <string>com.carlomontec.mosaiclab.multiplatform</string>
     <key>CFBundleInfoDictionaryVersion</key>
     <string>6.0</string>
     <key>CFBundleName</key>
-    <string>$DISPLAY_NAME</string>
+    <string>MosaicLab (Multiplatform)</string>
     <key>CFBundleDisplayName</key>
-    <string>$DISPLAY_NAME</string>
+    <string>MosaicLab (Multiplatform)</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
-    <string>0.1.0</string>
+    <string>0.1.0-multiplatform</string>
     <key>CFBundleVersion</key>
     <string>1</string>
     <key>LSMinimumSystemVersion</key>

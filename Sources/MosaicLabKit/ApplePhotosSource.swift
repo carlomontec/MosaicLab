@@ -1,7 +1,6 @@
 import Foundation
 import CoreGraphics
 import Photos
-import AppKit
 
 public final class ApplePhotosSource: MosaicImageSource, @unchecked Sendable {
     public static let shared = ApplePhotosSource()
@@ -169,14 +168,8 @@ public final class ApplePhotosSource: MosaicImageSource, @unchecked Sendable {
                 contentMode: .aspectFill,
                 options: options
             ) { image, info in
-                // If PhotoKit cancelled or failed, return nil
-                guard let nsImage = image else {
-                    continuation.resume(returning: nil)
-                    return
-                }
-                
-                // Convert NSImage to 16x16 RGBA Data
-                guard let cgImg = nsImage.cgImage(forProposedRect: nil, context: nil, hints: nil) else {
+                // Extract CGImage using platform-agnostic bridge
+                guard let cgImg = image?.cgImageBridge else {
                     continuation.resume(returning: nil)
                     return
                 }
@@ -238,8 +231,7 @@ public final class ApplePhotosSource: MosaicImageSource, @unchecked Sendable {
                 contentMode: .aspectFill,
                 options: options
             ) { [weak self] image, _ in
-                guard let nsImg = image,
-                      let cgImg = nsImg.cgImage(forProposedRect: nil, context: nil, hints: nil) else {
+                guard let cgImg = image?.cgImageBridge else {
                     continuation.resume(returning: nil)
                     return
                 }
@@ -273,8 +265,7 @@ public final class ApplePhotosSource: MosaicImageSource, @unchecked Sendable {
             contentMode: .aspectFill,
             options: options
         ) { [weak self] image, _ in
-            guard let nsImg = image,
-                  let cgImg = nsImg.cgImage(forProposedRect: nil, context: nil, hints: nil) else {
+            guard let cgImg = image?.cgImageBridge else {
                 return
             }
             let cost = cgImg.bytesPerRow * cgImg.height
@@ -306,8 +297,7 @@ public final class ApplePhotosSource: MosaicImageSource, @unchecked Sendable {
                 contentMode: .default,
                 options: options
             ) { image, _ in
-                guard let nsImg = image,
-                      let cgImg = nsImg.cgImage(forProposedRect: nil, context: nil, hints: nil) else {
+                guard let cgImg = image?.cgImageBridge else {
                     continuation.resume(returning: nil)
                     return
                 }

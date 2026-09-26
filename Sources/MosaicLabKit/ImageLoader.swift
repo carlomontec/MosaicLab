@@ -8,11 +8,35 @@ public struct SourceImageCandidate: Sendable {
     public let url: URL
     public let thumbnailPixels: Data // 16x16 RGBA (1024 bytes)
     public let edgeDescriptor: MosaicEdgeDescriptor
+    public let meanR: Float
+    public let meanG: Float
+    public let meanB: Float
     
     public init(identifier: String, url: URL, thumbnailPixels: Data, edgeDescriptor: MosaicEdgeDescriptor? = nil) {
         self.identifier = identifier
         self.url = url
         self.thumbnailPixels = thumbnailPixels
+        
+        var sumR: Float = 0
+        var sumG: Float = 0
+        var sumB: Float = 0
+        let count = 256
+        
+        thumbnailPixels.withUnsafeBytes { ptr in
+            if let base = ptr.baseAddress?.assumingMemoryBound(to: UInt8.self) {
+                for i in 0..<count {
+                    let off = i * 4
+                    sumR += Float(base[off])
+                    sumG += Float(base[off + 1])
+                    sumB += Float(base[off + 2])
+                }
+            }
+        }
+        let invCount = 1.0 / Float(count)
+        self.meanR = sumR * invCount
+        self.meanG = sumG * invCount
+        self.meanB = sumB * invCount
+        
         if let ed = edgeDescriptor {
             self.edgeDescriptor = ed
         } else {

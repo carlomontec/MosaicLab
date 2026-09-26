@@ -1,5 +1,7 @@
 import SwiftUI
+#if os(macOS)
 import AppKit
+#endif
 import MosaicLabKit
 
 public struct MainWindowView: View {
@@ -8,12 +10,22 @@ public struct MainWindowView: View {
     public init() {}
     
     public var body: some View {
-        HSplitView {
-            SidebarView()
-                .frame(minWidth: 280, idealWidth: 320, maxWidth: 380)
-            
-            MosaicCanvasView()
-                .frame(minWidth: 500, minHeight: 450)
+        ZStack {
+            #if os(macOS)
+            HSplitView {
+                SidebarView()
+                    .frame(minWidth: 280, idealWidth: 320, maxWidth: 380)
+                
+                MosaicCanvasView()
+                    .frame(minWidth: 500, minHeight: 450)
+            }
+            #else
+            NavigationSplitView {
+                SidebarView()
+            } detail: {
+                MosaicCanvasView()
+            }
+            #endif
         }
         .toolbar {
             ToolbarItemGroup(placement: .navigation) {
@@ -63,7 +75,7 @@ public struct MainWindowView: View {
                 .padding(.vertical, 4)
                 .background(
                     Capsule()
-                        .fill(Color(nsColor: .controlBackgroundColor).opacity(0.85))
+                        .fill(Color.platformControlBackground.opacity(0.85))
                         .shadow(color: Color.black.opacity(0.08), radius: 2, y: 1)
                 )
             }
@@ -159,21 +171,12 @@ public struct MainWindowView: View {
                             ScrollView {
                                 VStack(alignment: .leading, spacing: 4) {
                                     ForEach(Array(viewModel.projectLoadingLogs.enumerated()), id: \.offset) { idx, log in
-                                        HStack(alignment: .top, spacing: 6) {
-                                            if idx == viewModel.projectLoadingLogs.count - 1 && viewModel.projectLoadingProgress < 1.0 {
-                                                Image(systemName: "arrow.right.circle.fill")
-                                                    .foregroundColor(.accentColor)
-                                                    .font(.caption2)
-                                            } else {
-                                                Image(systemName: "checkmark.circle.fill")
-                                                    .foregroundColor(.green)
-                                                    .font(.caption2)
-                                            }
-                                            Text(log)
-                                                .font(.system(.caption, design: .monospaced))
-                                                .foregroundColor(idx == viewModel.projectLoadingLogs.count - 1 ? .primary : .secondary)
-                                        }
-                                        .id(idx)
+                                        LoadingLogRowView(
+                                            idx: idx,
+                                            log: log,
+                                            isLast: idx == viewModel.projectLoadingLogs.count - 1,
+                                            isLoading: viewModel.projectLoadingProgress < 1.0
+                                        )
                                     }
                                 }
                                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -182,7 +185,7 @@ public struct MainWindowView: View {
                             .frame(height: 120)
                             .background(
                                 RoundedRectangle(cornerRadius: 8)
-                                    .fill(Color(nsColor: .controlBackgroundColor).opacity(0.85))
+                                    .fill(Color.platformControlBackground.opacity(0.85))
                             )
                             .overlay(
                                 RoundedRectangle(cornerRadius: 8)
@@ -201,7 +204,7 @@ public struct MainWindowView: View {
                     .frame(maxWidth: 460)
                     .background(
                         RoundedRectangle(cornerRadius: 14)
-                            .fill(Color(nsColor: .windowBackgroundColor))
+                            .fill(Color.platformWindowBackground)
                             .shadow(color: Color.black.opacity(0.25), radius: 14, y: 6)
                     )
                 }
@@ -261,5 +264,30 @@ public struct MainWindowView: View {
 extension MosaicTile: Identifiable {
     public var id: Int {
         return self.geometry.tileIndex
+    }
+}
+
+private struct LoadingLogRowView: View {
+    let idx: Int
+    let log: String
+    let isLast: Bool
+    let isLoading: Bool
+    
+    var body: some View {
+        HStack(alignment: .top, spacing: 6) {
+            if isLast && isLoading {
+                Image(systemName: "arrow.right.circle.fill")
+                    .foregroundColor(.accentColor)
+                    .font(.caption2)
+            } else {
+                Image(systemName: "checkmark.circle.fill")
+                    .foregroundColor(.green)
+                    .font(.caption2)
+            }
+            Text(log)
+                .font(.system(.caption, design: .monospaced))
+                .foregroundColor(isLast ? .primary : .secondary)
+        }
+        .id(idx)
     }
 }

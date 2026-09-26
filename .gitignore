@@ -5,6 +5,7 @@ xcuserdata
 
 # SwiftPM & Builds
 .build/
+.build-multiplatform/
 .swiftpm/
 build/
 *.app/

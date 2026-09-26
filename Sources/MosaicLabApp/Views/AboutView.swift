@@ -1,5 +1,7 @@
 import SwiftUI
+#if os(macOS)
 import AppKit
+#endif
 
 public struct AboutView: View {
     @Environment(\.dismiss) private var dismiss
@@ -9,12 +11,20 @@ public struct AboutView: View {
     public var body: some View {
         VStack(spacing: 20) {
             // App Icon
+            #if os(macOS)
             if let iconImage = NSImage(named: NSImage.applicationIconName) {
                 Image(nsImage: iconImage)
                     .resizable()
                     .frame(width: 80, height: 80)
                     .shadow(color: .black.opacity(0.15), radius: 6, x: 0, y: 3)
             }
+            #else
+            Image(systemName: "photo.on.rectangle.angled")
+                .resizable()
+                .scaledToFit()
+                .frame(width: 64, height: 64)
+                .foregroundColor(.accentColor)
+            #endif
             
             // Header
             VStack(spacing: 4) {

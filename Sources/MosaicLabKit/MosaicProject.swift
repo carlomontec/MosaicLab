@@ -2,6 +2,7 @@ import Foundation
 import CoreGraphics
 import ImageIO
 import UniformTypeIdentifiers
+import ZIPFoundation
 
 /// Data representation of a MosaicLab project file (.mosaiclab)
 public struct MosaicLabProject: Codable, Sendable {
@@ -254,20 +255,8 @@ public final class MosaicProjectManager: @unchecked Sendable {
             try fileManager.removeItem(at: destinationURL)
         }
         
-        // 6. Compress folder into .mosaiclab archive using macOS native ditto
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/ditto")
-        process.arguments = ["-c", "-k", "--norsrc", tempDir.path, destinationURL.path]
-        try process.run()
-        process.waitUntilExit()
-        
-        if process.terminationStatus != 0 {
-            throw NSError(
-                domain: "MosaicProjectManager",
-                code: Int(process.terminationStatus),
-                userInfo: [NSLocalizedDescriptionKey: "Failed to compress .mosaiclab project archive."]
-            )
-        }
+        // 6. Compress folder into .mosaiclab archive using pure-Swift cross-platform ZIPFoundation
+        try fileManager.zipItem(at: tempDir, to: destinationURL, shouldKeepParent: false)
     }
     
     /// Convenience overload for saving without extra assets.
@@ -285,12 +274,20 @@ public final class MosaicProjectManager: @unchecked Sendable {
         try fileManager.createDirectory(at: tempDir, withIntermediateDirectories: true)
         defer { try? fileManager.removeItem(at: tempDir) }
         
-        // 1. Try extracting with ditto (handles .mosaiclab and .macosaix zip containers)
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/ditto")
-        process.arguments = ["-x", "-k", sourceURL.path, tempDir.path]
-        try? process.run()
-        process.waitUntilExit()
+        // 1. Try extracting with pure-Swift ZIPFoundation (with macOS ditto fallback for legacy containers)
+        do {
+            try fileManager.unzipItem(at: sourceURL, to: tempDir)
+        } catch {
+            #if os(macOS)
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/ditto")
+            process.arguments = ["-x", "-k", sourceURL.path, tempDir.path]
+            try? process.run()
+            process.waitUntilExit()
+            #else
+            throw error
+            #endif
+        }
         
         var targetJSONURL = tempDir.appendingPathComponent("mosaic.json")
         var baseDir = tempDir

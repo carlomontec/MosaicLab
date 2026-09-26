@@ -1,5 +1,7 @@
 import SwiftUI
+#if os(macOS)
 import AppKit
+#endif
 import MosaicLabKit
 
 public struct SidebarView: View {
@@ -680,6 +682,7 @@ public struct SidebarView: View {
     
     private func chooseSourceFolder() {
         guard !viewModel.isExporting, !viewModel.isLoadingProject else { return }
+        #if os(macOS)
         let panel = NSOpenPanel()
         panel.canChooseFiles = false
         panel.canChooseDirectories = true
@@ -695,6 +698,9 @@ public struct SidebarView: View {
                 }
             }
         }
+        #else
+        viewModel.isFolderPickerPresented = true
+        #endif
     }
     
     private func handleDroppedSources(_ providers: [NSItemProvider]) {
