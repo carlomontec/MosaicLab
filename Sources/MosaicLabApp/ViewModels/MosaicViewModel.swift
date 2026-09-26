@@ -174,6 +174,115 @@ public final class MosaicViewModel: ObservableObject {
     @Published public var sourceFolders: [URL] = []
     @Published public var localCandidateItems: [MosaicCandidateItem] = []
     @Published public var applePhotosCandidateItems: [MosaicCandidateItem] = []
+    
+    // Wikimedia Commons Source State
+    @Published public var useWikimediaCommons: Bool = false {
+        didSet {
+            if useWikimediaCommons != oldValue {
+                if useWikimediaCommons && wikimediaCandidateItems.isEmpty {
+                    loadWikimediaCandidates()
+                } else {
+                    recomputeCombinedCandidates()
+                }
+            }
+        }
+    }
+    @Published public var selectedWikimediaPresetID: String = "art"
+    @Published public var wikimediaCustomQuery: String = ""
+    @Published public var wikimediaResultLimit: Int = 1000
+    @Published public var wikimediaCandidateItems: [MosaicCandidateItem] = []
+    @Published public var isLoadingWikimedia: Bool = false
+    
+    // Met Museum Open Access Source State
+    @Published public var useMetMuseum: Bool = false {
+        didSet {
+            if useMetMuseum != oldValue {
+                if useMetMuseum && metMuseumCandidateItems.isEmpty {
+                    loadMetMuseumCandidates()
+                } else {
+                    recomputeCombinedCandidates()
+                }
+            }
+        }
+    }
+    @Published public var selectedMetPresetID: String = "european-paintings"
+    @Published public var metMuseumCustomQuery: String = ""
+    @Published public var metMuseumResultLimit: Int = 500
+    @Published public var metMuseumCandidateItems: [MosaicCandidateItem] = []
+    @Published public var isLoadingMetMuseum: Bool = false
+    
+    // Art Institute of Chicago Open Access State
+    @Published public var useAIC: Bool = false {
+        didSet {
+            if useAIC != oldValue {
+                if useAIC && aicCandidateItems.isEmpty {
+                    loadAICCandidates()
+                } else {
+                    recomputeCombinedCandidates()
+                }
+            }
+        }
+    }
+    @Published public var selectedAICPresetID: String = "masterpieces"
+    @Published public var aicCustomQuery: String = ""
+    @Published public var aicResultLimit: Int = 1000
+    @Published public var aicCandidateItems: [MosaicCandidateItem] = []
+    @Published public var isLoadingAIC: Bool = false
+    
+    // Biodiversity Heritage Library State
+    @Published public var useBHL: Bool = false {
+        didSet {
+            if useBHL != oldValue {
+                if useBHL && bhlCandidateItems.isEmpty {
+                    loadBHLCandidates()
+                } else {
+                    recomputeCombinedCandidates()
+                }
+            }
+        }
+    }
+    @Published public var selectedBHLPresetID: String = "botanical"
+    @Published public var bhlCustomQuery: String = ""
+    @Published public var bhlResultLimit: Int = 1000
+    @Published public var bhlCandidateItems: [MosaicCandidateItem] = []
+    @Published public var isLoadingBHL: Bool = false
+    
+    // Paris Musées State
+    @Published public var useParisMusees: Bool = false {
+        didSet {
+            if useParisMusees != oldValue {
+                if useParisMusees && parisMuseesCandidateItems.isEmpty {
+                    loadParisMuseesCandidates()
+                } else {
+                    recomputeCombinedCandidates()
+                }
+            }
+        }
+    }
+    @Published public var selectedParisMuseesPresetID: String = "fine-art"
+    @Published public var parisMuseesCustomQuery: String = ""
+    @Published public var parisMuseesResultLimit: Int = 1000
+    @Published public var parisMuseesCandidateItems: [MosaicCandidateItem] = []
+    @Published public var isLoadingParisMusees: Bool = false
+    
+    // Smithsonian Open Access State
+    @Published public var useSmithsonian: Bool = false {
+        didSet {
+            if useSmithsonian != oldValue {
+                if useSmithsonian && smithsonianCandidateItems.isEmpty {
+                    loadSmithsonianCandidates()
+                } else {
+                    recomputeCombinedCandidates()
+                }
+            }
+        }
+    }
+    @Published public var selectedSmithsonianPresetID: String = "air-and-space"
+    @Published public var smithsonianCustomQuery: String = ""
+    @Published public var smithsonianResultLimit: Int = 1000
+    @Published public var smithsonianCandidateItems: [MosaicCandidateItem] = []
+    @Published public var isLoadingSmithsonian: Bool = false
+    
     @Published public var candidateItems: [MosaicCandidateItem] = []
     @Published public var foundImageURLs: [URL] = []
     @Published public var heicCount: Int = 0
@@ -467,12 +576,55 @@ public final class MosaicViewModel: ObservableObject {
     
     public func recomputeCombinedCandidates() {
         var combined: [MosaicCandidateItem] = []
+        var sourceSummaryParts: [String] = []
         
         if useLocalFolders {
             combined.append(contentsOf: localCandidateItems)
+            if !localCandidateItems.isEmpty {
+                sourceSummaryParts.append("\(localCandidateItems.count) Local")
+            }
         }
         if useApplePhotos && isPhotosAuthorized {
             combined.append(contentsOf: applePhotosCandidateItems)
+            if !applePhotosCandidateItems.isEmpty {
+                sourceSummaryParts.append("\(applePhotosCandidateItems.count) Photos")
+            }
+        }
+        if useWikimediaCommons {
+            combined.append(contentsOf: wikimediaCandidateItems)
+            if !wikimediaCandidateItems.isEmpty {
+                sourceSummaryParts.append("\(wikimediaCandidateItems.count) Wikimedia")
+            }
+        }
+        if useMetMuseum {
+            combined.append(contentsOf: metMuseumCandidateItems)
+            if !metMuseumCandidateItems.isEmpty {
+                sourceSummaryParts.append("\(metMuseumCandidateItems.count) The Met")
+            }
+        }
+        if useAIC {
+            combined.append(contentsOf: aicCandidateItems)
+            if !aicCandidateItems.isEmpty {
+                sourceSummaryParts.append("\(aicCandidateItems.count) Chicago Art")
+            }
+        }
+        if useBHL {
+            combined.append(contentsOf: bhlCandidateItems)
+            if !bhlCandidateItems.isEmpty {
+                sourceSummaryParts.append("\(bhlCandidateItems.count) BHL")
+            }
+        }
+        if useParisMusees {
+            combined.append(contentsOf: parisMuseesCandidateItems)
+            if !parisMuseesCandidateItems.isEmpty {
+                sourceSummaryParts.append("\(parisMuseesCandidateItems.count) Paris")
+            }
+        }
+        if useSmithsonian {
+            combined.append(contentsOf: smithsonianCandidateItems)
+            if !smithsonianCandidateItems.isEmpty {
+                sourceSummaryParts.append("\(smithsonianCandidateItems.count) Smithsonian")
+            }
         }
         
         self.candidateItems = combined
@@ -480,12 +632,16 @@ public final class MosaicViewModel: ObservableObject {
         self.totalImagesCount = combined.count
         
         // Multi-format breakdown text
-        if useLocalFolders && useApplePhotos && isPhotosAuthorized {
-            self.formatBreakdownText = "\(applePhotosCandidateItems.count) Photos • \(localCandidateItems.count) Folder items (Total: \(combined.count))"
+        if sourceSummaryParts.count > 1 {
+            self.formatBreakdownText = sourceSummaryParts.joined(separator: " • ") + " (Total: \(combined.count))"
         } else if useApplePhotos && isPhotosAuthorized {
             let albumTitle = self.availableAlbums.first(where: { $0.id == self.selectedAlbumID })?.title ?? "Photos"
             self.formatBreakdownText = "\(applePhotosCandidateItems.count) photos in \(albumTitle)"
-        } else if useLocalFolders {
+        } else if useWikimediaCommons && sourceSummaryParts.count == 1 {
+            self.formatBreakdownText = "\(wikimediaCandidateItems.count) Wikimedia Commons images"
+        } else if useMetMuseum && sourceSummaryParts.count == 1 {
+            self.formatBreakdownText = "\(metMuseumCandidateItems.count) The Met Open Access artworks"
+        } else if useLocalFolders && !localCandidateItems.isEmpty {
             var counts: [String: Int] = [:]
             for item in localCandidateItems {
                 let ext = (item.originalURL?.pathExtension ?? "").lowercased()
@@ -515,7 +671,7 @@ public final class MosaicViewModel: ObservableObject {
             let sorted = counts.filter { $0.value > 0 }.sorted { $0.value > $1.value }
             self.formatBreakdownText = sorted.map { "\($0.value) \($0.key)" }.joined(separator: " • ")
         } else {
-            self.formatBreakdownText = "No active image sources selected"
+            self.formatBreakdownText = combined.isEmpty ? "No active image sources selected" : "\(combined.count) items"
         }
         
         updateMemoryEstimate()
@@ -584,8 +740,143 @@ public final class MosaicViewModel: ObservableObject {
         }
     }
     
+    public func loadWikimediaCandidates() {
+        self.isLoadingWikimedia = true
+        self.statusMessage = "Searching Wikimedia Commons..."
+        
+        let source = WikimediaCommonsSource.shared
+        source.selectedPresetID = selectedWikimediaPresetID
+        source.customQuery = wikimediaCustomQuery
+        source.resultLimit = wikimediaResultLimit
+        
+        Task { @MainActor in
+            do {
+                let items = try await source.enumerateCandidates(progress: nil)
+                self.wikimediaCandidateItems = items
+                self.isLoadingWikimedia = false
+                self.recomputeCombinedCandidates()
+            } catch {
+                self.isLoadingWikimedia = false
+                self.statusMessage = "Error querying Wikimedia: \(error.localizedDescription)"
+            }
+        }
+    }
+    
+    public func loadMetMuseumCandidates() {
+        self.isLoadingMetMuseum = true
+        self.statusMessage = "Searching The Met Open Access..."
+        
+        let source = MetMuseumSource.shared
+        source.selectedPresetID = selectedMetPresetID
+        source.customQuery = metMuseumCustomQuery
+        source.resultLimit = metMuseumResultLimit
+        
+        Task { @MainActor in
+            do {
+                let items = try await source.enumerateCandidates(progress: nil)
+                self.metMuseumCandidateItems = items
+                self.isLoadingMetMuseum = false
+                self.recomputeCombinedCandidates()
+            } catch {
+                self.isLoadingMetMuseum = false
+                self.statusMessage = "Error querying The Met: \(error.localizedDescription)"
+            }
+        }
+    }
+    
+    public func loadAICCandidates() {
+        self.isLoadingAIC = true
+        self.statusMessage = "Searching Art Institute of Chicago..."
+        
+        let source = ArtInstituteChicagoSource.shared
+        source.selectedPresetID = selectedAICPresetID
+        source.customQuery = aicCustomQuery
+        source.resultLimit = aicResultLimit
+        
+        Task { @MainActor in
+            do {
+                let items = try await source.enumerateCandidates(progress: nil)
+                self.aicCandidateItems = items
+                self.isLoadingAIC = false
+                self.recomputeCombinedCandidates()
+            } catch {
+                self.isLoadingAIC = false
+                self.statusMessage = "Error querying Art Institute: \(error.localizedDescription)"
+            }
+        }
+    }
+    
+    public func loadBHLCandidates() {
+        self.isLoadingBHL = true
+        self.statusMessage = "Searching Biodiversity Heritage Library..."
+        
+        let source = BHLSource.shared
+        source.selectedPresetID = selectedBHLPresetID
+        source.customQuery = bhlCustomQuery
+        source.resultLimit = bhlResultLimit
+        
+        Task { @MainActor in
+            do {
+                let items = try await source.enumerateCandidates(progress: nil)
+                self.bhlCandidateItems = items
+                self.isLoadingBHL = false
+                self.recomputeCombinedCandidates()
+            } catch {
+                self.isLoadingBHL = false
+                self.statusMessage = "Error querying BHL: \(error.localizedDescription)"
+            }
+        }
+    }
+    
+    public func loadParisMuseesCandidates() {
+        self.isLoadingParisMusees = true
+        self.statusMessage = "Searching Paris Musées..."
+        
+        let source = ParisMuseesSource.shared
+        source.selectedPresetID = selectedParisMuseesPresetID
+        source.customQuery = parisMuseesCustomQuery
+        source.resultLimit = parisMuseesResultLimit
+        
+        Task { @MainActor in
+            do {
+                let items = try await source.enumerateCandidates(progress: nil)
+                self.parisMuseesCandidateItems = items
+                self.isLoadingParisMusees = false
+                self.recomputeCombinedCandidates()
+            } catch {
+                self.isLoadingParisMusees = false
+                self.statusMessage = "Error querying Paris Musées: \(error.localizedDescription)"
+            }
+        }
+    }
+    
+    public func loadSmithsonianCandidates() {
+        self.isLoadingSmithsonian = true
+        self.statusMessage = "Searching Smithsonian Open Access..."
+        
+        let source = SmithsonianSource.shared
+        source.selectedPresetID = selectedSmithsonianPresetID
+        source.customQuery = smithsonianCustomQuery
+        source.resultLimit = smithsonianResultLimit
+        
+        Task { @MainActor in
+            do {
+                let items = try await source.enumerateCandidates(progress: nil)
+                self.smithsonianCandidateItems = items
+                self.isLoadingSmithsonian = false
+                self.recomputeCombinedCandidates()
+            } catch {
+                self.isLoadingSmithsonian = false
+                self.statusMessage = "Error querying Smithsonian: \(error.localizedDescription)"
+            }
+        }
+    }
+    
     public func cgImageForTile(_ tile: MosaicTile) -> CGImage? {
         guard let url = tile.bestImageURL else { return nil }
+        if let thumb = MosaicThumbnailCache.shared.thumbnail(for: url, maxPixelSize: 320) {
+            return thumb
+        }
         if url.scheme == "applephotos" {
             if let comps = URLComponents(url: url, resolvingAgainstBaseURL: false),
                let idItem = comps.queryItems?.first(where: { $0.name == "id" })?.value {
@@ -633,7 +924,6 @@ public final class MosaicViewModel: ObservableObject {
         matchingTask = Task.detached(priority: .userInitiated) { [weak self, engine, items] in
             let total = items.count
             var count = 0
-            let loader = ImageLoader()
             let batchSize = max(64, ProcessInfo.processInfo.activeProcessorCount * 8)
             var lastUIUpdateTime = ContinuousClock.now
             var lastCanvasUpdateTime = ContinuousClock.now
@@ -661,14 +951,7 @@ public final class MosaicViewModel: ObservableObject {
                         group.addTask {
                             if Task.isCancelled { return nil }
                             
-                            let thumbData: Data?
-                            if item.sourceProviderID == "apple-photos" {
-                                thumbData = try? await ApplePhotosSource.shared.loadCandidateThumbnail(for: item)
-                            } else if let url = item.originalURL {
-                                thumbData = loader.loadThumbnail(from: url, targetSize: 16)
-                            } else {
-                                thumbData = nil
-                            }
+                            let thumbData = try? await MosaicImageSourceRegistry.shared.loadCandidateThumbnail(for: item)
                             
                             guard let data = thumbData else { return nil }
                             return SourceImageCandidate(
@@ -1137,7 +1420,7 @@ public final class MosaicViewModel: ObservableObject {
         for (idx, tile) in engine.tiles.enumerated() {
             var thumbFilename: String? = nil
             if let imageURL = tile.bestImageURL {
-                let path = imageURL.path
+                let path = imageURL.absoluteString
                 if let existing = pathToThumbFile[path] {
                     thumbFilename = existing
                 } else {
@@ -1153,7 +1436,7 @@ public final class MosaicViewModel: ObservableObject {
             tileRecords.append(
                 MosaicLabProject.TileMatchRecord(
                     index: idx,
-                    imagePath: tile.bestImageURL?.path,
+                    imagePath: tile.bestImageURL?.absoluteString,
                     score: tile.bestScore,
                     thumbnailFile: thumbFilename
                 )

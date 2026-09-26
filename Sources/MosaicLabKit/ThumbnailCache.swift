@@ -44,24 +44,28 @@ public final class MosaicThumbnailCache: @unchecked Sendable {
             return nil
         }
         
-        let opts: [CFString: Any] = [
-            kCGImageSourceShouldCache: false
-        ]
-        guard let src = CGImageSourceCreateWithURL(url as CFURL, opts as CFDictionary) else {
-            return nil
+        if url.isFileURL {
+            let opts: [CFString: Any] = [
+                kCGImageSourceShouldCache: false
+            ]
+            guard let src = CGImageSourceCreateWithURL(url as CFURL, opts as CFDictionary) else {
+                return nil
+            }
+            let thumbOpts: [CFString: Any] = [
+                kCGImageSourceCreateThumbnailFromImageAlways: true,
+                kCGImageSourceThumbnailMaxPixelSize: maxPixelSize,
+                kCGImageSourceCreateThumbnailWithTransform: true,
+                kCGImageSourceShouldCacheImmediately: true
+            ]
+            guard let thumb = CGImageSourceCreateThumbnailAtIndex(src, 0, thumbOpts as CFDictionary) else {
+                return nil
+            }
+            let cost = thumb.bytesPerRow * thumb.height
+            cache.setObject(thumb, forKey: key, cost: cost)
+            return thumb
         }
-        let thumbOpts: [CFString: Any] = [
-            kCGImageSourceCreateThumbnailFromImageAlways: true,
-            kCGImageSourceThumbnailMaxPixelSize: maxPixelSize,
-            kCGImageSourceCreateThumbnailWithTransform: true,
-            kCGImageSourceShouldCacheImmediately: true
-        ]
-        guard let thumb = CGImageSourceCreateThumbnailAtIndex(src, 0, thumbOpts as CFDictionary) else {
-            return nil
-        }
-        let cost = thumb.bytesPerRow * thumb.height
-        cache.setObject(thumb, forKey: key, cost: cost)
-        return thumb
+        
+        return nil
     }
     
     /// Retrieves a tile display thumbnail, optionally applying Reinhard perceptual color transfer.

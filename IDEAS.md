@@ -111,22 +111,56 @@ When inspecting a generated mosaic, a user may identify a specific photograph th
 
 ---
 
+### 5. Source Provenance Color Map & Multi-Provider Attribution Overlay 🗺️🏷️
+*Suggested by Carlo Monjaraz-Tec*
+
+**Concept:**
+When generating mosaics using hybrid, multi-source collections (e.g., blending Local Family Photos with Chicago Art Institute masterpieces, Biodiversity Heritage botanical plates, and Smithsonian aerospace archives), visualize tile provenance directly across the canvas using a categorical source color map. This allows instant spatial inspection of which collections contributed to specific chromatic, textural, or semantic zones of the image.
+
+**Key Mechanics & Design:**
+- **Categorical Source Colormap**:
+  - Each active image source provider is assigned an unambiguous, distinguishable perceptual palette:
+    - **Local Folders**: Royal Blue (`#2563EB`)
+    - **Apple Photos**: Cyan (`#06B6D4`)
+    - **Wikimedia Commons**: Slate Gray / Purple (`#7C3AED`)
+    - **The Met Collection**: Classic Ochre / Gold (`#D97706`)
+    - **Chicago Art Institute**: Vermilion / Crimson (`#DC2626`)
+    - **Biodiversity Heritage Library (BHL)**: Emerald / Forest Green (`#059669`)
+    - **Paris Musées**: Lavender / Violet (`#9333EA`)
+    - **Smithsonian Open Access**: Bright Amber / Orange (`#EA580C`)
+- **Interactive Canvas Overlays**:
+  - **Flat Provenance Mode**: Replaces tile imagery with flat, categorized color blocks to display pure provider territory and spatial clustering.
+  - **Translucent Tint Overlay Mode**: Alpha-blends the provider color (e.g., 35% opacity) over the actual tile photograph, preserving photographic context while immediately signaling provenance.
+  - **Source Isolation / Solo Filter**: Clicking a provider in the legend highlights only tiles matched from that source, dimming or desaturating all other tiles.
+- **Provider Contribution Analytics**:
+  - Live spatial and numerical statistics in a floating overlay or sidebar breakdown:
+    $$\text{Attribution Share}_k = \frac{N_k}{N_{\text{total}}} \times 100\%$$
+    *Example*: `Chicago Art: 42% (524 tiles) • BHL: 28% (350 tiles) • Smithsonian: 18% (225 tiles) • Local: 12% (150 tiles)`.
+  - Spatial correlation analysis: reports which sources dominated specific luminance ranges (e.g. *"BHL supplied 82% of mid-frequency green and floral textures; Smithsonian supplied 74% of high-contrast metallic and dark tones"*).
+- **Tile Detail Attribution Inspector**:
+  - Hovering or clicking any tile in provenance mode displays a rich provenance badge:
+    - Provider logo and name (e.g. `[BHL] Biodiversity Heritage Library`).
+    - Original artwork / specimen metadata title.
+    - Deep-link button to view the high-resolution source item online (or in Apple Photos).
+
+---
+
 ## 🔬 Exploration & Research Ideas
 
-### 5. Apple Vision Saliency-Guided Voronoi Tessellation 🏛️
+### 6. Apple Vision Saliency-Guided Voronoi Tessellation 🏛️
 - Use Apple's Vision framework (`VNGenerateAttentionBasedSaliencyImageRequest`) to compute subject saliency maps.
 - Seed Voronoi relaxation points densely over high-saliency features (faces, focal objects) and sparsely over backgrounds.
 - Generates organic, stained-glass / Roman mosaic aesthetics with smooth Lloyd's relaxation.
 
-### 6. Global Optimal Assignment for "No Duplicates" (Auction / Hungarian Algorithm) 🧩
+### 7. Global Optimal Assignment for "No Duplicates" (Auction / Hungarian Algorithm) 🧩
 - Currently, when `--max-reuse 1` is enabled, candidates are placed greedily based on the order photos are scanned.
 - A global Linear Sum Assignment (or Bertsekas Auction algorithm) would find the mathematically optimal $1$-to-$1$ bijection between all $N$ tiles and $N$ constituent photos, maximizing total mosaic fidelity across the whole image simultaneously.
 
-### 7. Tile Drag-to-Swap & Direct Reassignment 🖐️
+### 8. Tile Drag-to-Swap & Direct Reassignment 🖐️
 - Allow the user to drag a photo from one tile directly onto another tile on the canvas to swap them.
 - Provide an "Undo / Redo" stack for manual tile modifications.
 
-### 8. Apple Neural Engine Semantic Matching (FeaturePrint Embeddings) 🧠
+### 9. Apple Neural Engine Semantic Matching (FeaturePrint Embeddings) 🧠
 - Utilize Vision framework `VNGenerateImageFeaturePrintRequest` to compute high-level semantic vector embeddings.
 - Combine color/spectral distance with semantic concept matching:
   $$\text{Score} = \alpha \cdot D_{\text{color}} + (1 - \alpha) \cdot D_{\text{semantic}}$$
@@ -135,6 +169,7 @@ When inspecting a generated mosaic, a user may identify a specific photograph th
 ---
 
 ## 📝 Change Log & Ideas Tracker
+- **2026-09-26**: Added Source Provenance Color Map & Multi-Provider Attribution Overlay (suggested by Carlo Monjaraz-Tec).
 - **2026-09-26**: Added Global Image Ban & Diverse Multi-Substitute Replacement (suggested by Carlo Monjaraz-Tec).
 - **2026-09-26**: Added Match Quality Heatmap with Perceptual Colormaps / Cubehelix (suggested by Carlo Monjaraz-Tec).
 - **2026-09-24**: Added Optimization Convergence History and GUI-to-CLI Recipe Exporter (suggested by Carlo Monjaraz-Tec).

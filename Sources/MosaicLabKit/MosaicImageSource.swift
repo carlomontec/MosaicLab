@@ -3,29 +3,41 @@ import CoreGraphics
 
 /// Identifies an individual image candidate regardless of where it resides.
 public struct MosaicCandidateItem: Identifiable, Hashable, Sendable {
-    public let id: String                    // Local path, PHAsset identifier, or Google mediaItemId
+    public let id: String                    // Local path, PHAsset identifier, or remote media ID
     public let displayName: String
-    public let sourceProviderID: String      // "local", "apple-photos", "google-photos", "onedrive"
-    public let originalURL: URL?             // Optional local file URL if available
+    public let sourceProviderID: String      // "local", "apple-photos", "wikimedia-commons", "met-museum", etc.
+    public let originalURL: URL?             // Optional full-resolution URL (local file URL or remote web URL)
+    public let thumbnailURL: URL?            // Optional fast-loading thumbnail URL (e.g. 256px remote image)
     
-    public init(id: String, displayName: String, sourceProviderID: String, originalURL: URL? = nil) {
+    public init(
+        id: String,
+        displayName: String,
+        sourceProviderID: String,
+        originalURL: URL? = nil,
+        thumbnailURL: URL? = nil
+    ) {
         self.id = id
         self.displayName = displayName
         self.sourceProviderID = sourceProviderID
         self.originalURL = originalURL
+        self.thumbnailURL = thumbnailURL
     }
     
-    /// Generates a canonical URL representation for this candidate (e.g., file:// or applephotos://asset?id=...).
+    /// Generates a canonical URL representation for this candidate (e.g., file://, applephotos://, or web URL).
     public var canonicalURL: URL {
         if let originalURL = originalURL {
             return originalURL
+        }
+        if let thumbnailURL = thumbnailURL {
+            return thumbnailURL
         }
         if sourceProviderID == "apple-photos" {
             // Encode asset identifier safely into a custom URL
             let encodedID = id.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? id
             return URL(string: "applephotos://asset?id=\(encodedID)")!
         }
-        return URL(string: "\(sourceProviderID)://item?id=\(id)")!
+        let encodedID = id.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? id
+        return URL(string: "\(sourceProviderID)://item?id=\(encodedID)")!
     }
 }
 

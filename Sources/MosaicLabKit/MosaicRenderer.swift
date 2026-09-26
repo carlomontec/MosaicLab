@@ -66,7 +66,7 @@ public final class MosaicRenderer {
                            let idItem = comps.queryItems?.first(where: { $0.name == "id" })?.value {
                             img = ApplePhotosSource.shared.cachedDisplayThumbnail(byIdentifier: idItem, maxPixelSize: targetPixelDim)
                         }
-                    } else {
+                    } else if imageURL.isFileURL {
                         let opts: [CFString: Any] = [
                             kCGImageSourceShouldCache: false
                         ]
@@ -79,6 +79,8 @@ public final class MosaicRenderer {
                             ]
                             img = CGImageSourceCreateThumbnailAtIndex(src, 0, drawOpts as CFDictionary)
                         }
+                    } else {
+                        img = MosaicThumbnailCache.shared.thumbnail(for: imageURL, maxPixelSize: targetPixelDim)
                     }
                     
                     if var cgImage = img {

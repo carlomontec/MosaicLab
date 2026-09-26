@@ -495,6 +495,743 @@ public struct SidebarView: View {
                             }
                         }
                     }
+                    
+                    Divider()
+                    
+                    // Source 3: Wikimedia Commons
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack {
+                            Toggle(isOn: Binding(
+                                get: { viewModel.useWikimediaCommons },
+                                set: { newVal in
+                                    if newVal != viewModel.useWikimediaCommons {
+                                        viewModel.proposeLayoutChange(description: "Wikimedia Commons Source") {
+                                            viewModel.useWikimediaCommons = newVal
+                                        }
+                                    }
+                                }
+                            )) {
+                                HStack(spacing: 4) {
+                                    Image(systemName: "globe")
+                                        .foregroundColor(.accentColor)
+                                    Text("Wikimedia Commons")
+                                        .fontWeight(.medium)
+                                }
+                            }
+                            .toggleStyle(.checkbox)
+                            .disabled(viewModel.isRunning)
+                            
+                            Spacer()
+                            
+                            if viewModel.useWikimediaCommons {
+                                Button(action: {
+                                    viewModel.loadWikimediaCandidates()
+                                }) {
+                                    Image(systemName: "arrow.clockwise")
+                                        .font(.caption2)
+                                        .foregroundColor(.secondary)
+                                }
+                                .buttonStyle(.plain)
+                                .disabled(viewModel.isRunning || viewModel.isLoadingWikimedia)
+                                .help("Refresh search")
+                            }
+                        }
+                        
+                        if viewModel.useWikimediaCommons {
+                            HStack {
+                                Text("Collection:")
+                                    .font(.caption)
+                                Spacer()
+                                Picker("", selection: Binding(
+                                    get: { viewModel.selectedWikimediaPresetID },
+                                    set: { newPreset in
+                                        if newPreset != viewModel.selectedWikimediaPresetID {
+                                            viewModel.proposeLayoutChange(description: "Wikimedia Collection") {
+                                                viewModel.selectedWikimediaPresetID = newPreset
+                                                viewModel.loadWikimediaCandidates()
+                                            }
+                                        }
+                                    }
+                                )) {
+                                    ForEach(WikimediaCommonsSource.presets) { preset in
+                                        Label(preset.title, systemImage: preset.iconName)
+                                            .tag(preset.id)
+                                    }
+                                }
+                                .pickerStyle(.menu)
+                                .disabled(viewModel.isRunning || viewModel.isLoadingWikimedia)
+                            }
+                            
+                            HStack {
+                                Text("Pool Size:")
+                                    .font(.caption)
+                                Spacer()
+                                Picker("", selection: Binding(
+                                    get: { viewModel.wikimediaResultLimit },
+                                    set: { newLimit in
+                                        if newLimit != viewModel.wikimediaResultLimit {
+                                            viewModel.proposeLayoutChange(description: "Wikimedia Pool Size to \(newLimit)") {
+                                                viewModel.wikimediaResultLimit = newLimit
+                                                viewModel.loadWikimediaCandidates()
+                                            }
+                                        }
+                                    }
+                                )) {
+                                    Text("500 photos").tag(500)
+                                    Text("1,000 photos").tag(1000)
+                                    Text("2,500 photos").tag(2500)
+                                    Text("5,000 photos").tag(5000)
+                                }
+                                .pickerStyle(.menu)
+                                .disabled(viewModel.isRunning || viewModel.isLoadingWikimedia)
+                            }
+                            
+                            if viewModel.selectedWikimediaPresetID == "custom" {
+                                HStack {
+                                    TextField("Search query...", text: $viewModel.wikimediaCustomQuery)
+                                        .textFieldStyle(.roundedBorder)
+                                        .font(.caption)
+                                        .disabled(viewModel.isRunning || viewModel.isLoadingWikimedia)
+                                        .onSubmit {
+                                            viewModel.loadWikimediaCandidates()
+                                        }
+                                    Button("Search") {
+                                        viewModel.loadWikimediaCandidates()
+                                    }
+                                    .controlSize(.small)
+                                    .disabled(viewModel.isRunning || viewModel.isLoadingWikimedia)
+                                }
+                            }
+                            
+                            HStack {
+                                if viewModel.isLoadingWikimedia {
+                                    ProgressView().controlSize(.mini)
+                                    Text("Searching Commons...")
+                                        .font(.caption2)
+                                        .foregroundColor(.secondary)
+                                } else {
+                                    Text("\(viewModel.wikimediaCandidateItems.count) public-domain images")
+                                        .font(.caption2)
+                                        .foregroundColor(.secondary)
+                                }
+                                Spacer()
+                            }
+                        }
+                    }
+                    
+                    Divider()
+                    
+                    // Source 4: The Met Collection
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack {
+                            Toggle(isOn: Binding(
+                                get: { viewModel.useMetMuseum },
+                                set: { newVal in
+                                    if newVal != viewModel.useMetMuseum {
+                                        viewModel.proposeLayoutChange(description: "The Met Collection Source") {
+                                            viewModel.useMetMuseum = newVal
+                                        }
+                                    }
+                                }
+                            )) {
+                                HStack(spacing: 4) {
+                                    Image(systemName: "building.columns")
+                                        .foregroundColor(.accentColor)
+                                    Text("The Met Collection")
+                                        .fontWeight(.medium)
+                                }
+                            }
+                            .toggleStyle(.checkbox)
+                            .disabled(viewModel.isRunning)
+                            
+                            Spacer()
+                            
+                            if viewModel.useMetMuseum {
+                                Button(action: {
+                                    viewModel.loadMetMuseumCandidates()
+                                }) {
+                                    Image(systemName: "arrow.clockwise")
+                                        .font(.caption2)
+                                        .foregroundColor(.secondary)
+                                }
+                                .buttonStyle(.plain)
+                                .disabled(viewModel.isRunning || viewModel.isLoadingMetMuseum)
+                                .help("Refresh Met search")
+                            }
+                        }
+                        
+                        if viewModel.useMetMuseum {
+                            HStack {
+                                Text("Department:")
+                                    .font(.caption)
+                                Spacer()
+                                Picker("", selection: Binding(
+                                    get: { viewModel.selectedMetPresetID },
+                                    set: { newPreset in
+                                        if newPreset != viewModel.selectedMetPresetID {
+                                            viewModel.proposeLayoutChange(description: "The Met Department") {
+                                                viewModel.selectedMetPresetID = newPreset
+                                                viewModel.loadMetMuseumCandidates()
+                                            }
+                                        }
+                                    }
+                                )) {
+                                    ForEach(MetMuseumSource.presets) { preset in
+                                        Label(preset.title, systemImage: preset.iconName)
+                                            .tag(preset.id)
+                                    }
+                                }
+                                .pickerStyle(.menu)
+                                .disabled(viewModel.isRunning || viewModel.isLoadingMetMuseum)
+                            }
+                            
+                            HStack {
+                                Text("Pool Size:")
+                                    .font(.caption)
+                                Spacer()
+                                Picker("", selection: Binding(
+                                    get: { viewModel.metMuseumResultLimit },
+                                    set: { newLimit in
+                                        if newLimit != viewModel.metMuseumResultLimit {
+                                            viewModel.proposeLayoutChange(description: "The Met Pool Size to \(newLimit)") {
+                                                viewModel.metMuseumResultLimit = newLimit
+                                                viewModel.loadMetMuseumCandidates()
+                                            }
+                                        }
+                                    }
+                                )) {
+                                    Text("200 artworks").tag(200)
+                                    Text("500 artworks").tag(500)
+                                    Text("1,000 artworks").tag(1000)
+                                }
+                                .pickerStyle(.menu)
+                                .disabled(viewModel.isRunning || viewModel.isLoadingMetMuseum)
+                            }
+                            
+                            if viewModel.selectedMetPresetID == "custom" {
+                                HStack {
+                                    TextField("Search Met artworks...", text: $viewModel.metMuseumCustomQuery)
+                                        .textFieldStyle(.roundedBorder)
+                                        .font(.caption)
+                                        .disabled(viewModel.isRunning || viewModel.isLoadingMetMuseum)
+                                        .onSubmit {
+                                            viewModel.loadMetMuseumCandidates()
+                                        }
+                                    Button("Search") {
+                                        viewModel.loadMetMuseumCandidates()
+                                    }
+                                    .controlSize(.small)
+                                    .disabled(viewModel.isRunning || viewModel.isLoadingMetMuseum)
+                                }
+                            }
+                            
+                            HStack {
+                                if viewModel.isLoadingMetMuseum {
+                                    ProgressView().controlSize(.mini)
+                                    Text("Searching The Met...")
+                                        .font(.caption2)
+                                        .foregroundColor(.secondary)
+                                } else {
+                                    Text("\(viewModel.metMuseumCandidateItems.count) Open Access artworks")
+                                        .font(.caption2)
+                                        .foregroundColor(.secondary)
+                                }
+                                Spacer()
+                            }
+                        }
+                    }
+                    
+                    Divider()
+                    
+                    // Source 5: Art Institute of Chicago
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack {
+                            Toggle(isOn: Binding(
+                                get: { viewModel.useAIC },
+                                set: { newVal in
+                                    if newVal != viewModel.useAIC {
+                                        viewModel.proposeLayoutChange(description: "Chicago Art Institute Source") {
+                                            viewModel.useAIC = newVal
+                                        }
+                                    }
+                                }
+                            )) {
+                                HStack(spacing: 4) {
+                                    Image(systemName: "paintpalette.fill")
+                                        .foregroundColor(.accentColor)
+                                    Text("Chicago Art Institute")
+                                        .fontWeight(.medium)
+                                }
+                            }
+                            .toggleStyle(.checkbox)
+                            .disabled(viewModel.isRunning)
+                            
+                            Spacer()
+                            
+                            if viewModel.useAIC {
+                                Button(action: {
+                                    viewModel.loadAICCandidates()
+                                }) {
+                                    Image(systemName: "arrow.clockwise")
+                                        .font(.caption2)
+                                        .foregroundColor(.secondary)
+                                }
+                                .buttonStyle(.plain)
+                                .disabled(viewModel.isRunning || viewModel.isLoadingAIC)
+                                .help("Refresh Art Institute search")
+                            }
+                        }
+                        
+                        if viewModel.useAIC {
+                            HStack {
+                                Text("Collection:")
+                                    .font(.caption)
+                                Spacer()
+                                Picker("", selection: Binding(
+                                    get: { viewModel.selectedAICPresetID },
+                                    set: { newPreset in
+                                        if newPreset != viewModel.selectedAICPresetID {
+                                            viewModel.proposeLayoutChange(description: "Art Institute Collection") {
+                                                viewModel.selectedAICPresetID = newPreset
+                                                viewModel.loadAICCandidates()
+                                            }
+                                        }
+                                    }
+                                )) {
+                                    ForEach(ArtInstituteChicagoSource.presets) { preset in
+                                        Label(preset.title, systemImage: preset.iconName)
+                                            .tag(preset.id)
+                                    }
+                                }
+                                .pickerStyle(.menu)
+                                .disabled(viewModel.isRunning || viewModel.isLoadingAIC)
+                            }
+                            
+                            HStack {
+                                Text("Pool Size:")
+                                    .font(.caption)
+                                Spacer()
+                                Picker("", selection: Binding(
+                                    get: { viewModel.aicResultLimit },
+                                    set: { newLimit in
+                                        if newLimit != viewModel.aicResultLimit {
+                                            viewModel.proposeLayoutChange(description: "Art Institute Pool Size to \(newLimit)") {
+                                                viewModel.aicResultLimit = newLimit
+                                                viewModel.loadAICCandidates()
+                                            }
+                                        }
+                                    }
+                                )) {
+                                    Text("500 artworks").tag(500)
+                                    Text("1,000 artworks").tag(1000)
+                                    Text("2,000 artworks").tag(2000)
+                                    Text("3,000 artworks").tag(3000)
+                                }
+                                .pickerStyle(.menu)
+                                .disabled(viewModel.isRunning || viewModel.isLoadingAIC)
+                            }
+                            
+                            if viewModel.selectedAICPresetID == "custom" {
+                                HStack {
+                                    TextField("Search artworks...", text: $viewModel.aicCustomQuery)
+                                        .textFieldStyle(.roundedBorder)
+                                        .font(.caption)
+                                        .disabled(viewModel.isRunning || viewModel.isLoadingAIC)
+                                        .onSubmit {
+                                            viewModel.loadAICCandidates()
+                                        }
+                                    Button("Search") {
+                                        viewModel.loadAICCandidates()
+                                    }
+                                    .controlSize(.small)
+                                    .disabled(viewModel.isRunning || viewModel.isLoadingAIC)
+                                }
+                            }
+                            
+                            HStack {
+                                if viewModel.isLoadingAIC {
+                                    ProgressView().controlSize(.mini)
+                                    Text("Searching Chicago Art...")
+                                        .font(.caption2)
+                                        .foregroundColor(.secondary)
+                                } else {
+                                    Text("\(viewModel.aicCandidateItems.count) Open Access artworks")
+                                        .font(.caption2)
+                                        .foregroundColor(.secondary)
+                                }
+                                Spacer()
+                            }
+                        }
+                    }
+                    
+                    Divider()
+                    
+                    // Source 6: Biodiversity Heritage Library
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack {
+                            Toggle(isOn: Binding(
+                                get: { viewModel.useBHL },
+                                set: { newVal in
+                                    if newVal != viewModel.useBHL {
+                                        viewModel.proposeLayoutChange(description: "BHL Source") {
+                                            viewModel.useBHL = newVal
+                                        }
+                                    }
+                                }
+                            )) {
+                                HStack(spacing: 4) {
+                                    Image(systemName: "leaf.fill")
+                                        .foregroundColor(.green)
+                                    Text("Biodiversity Heritage")
+                                        .fontWeight(.medium)
+                                }
+                            }
+                            .toggleStyle(.checkbox)
+                            .disabled(viewModel.isRunning)
+                            
+                            Spacer()
+                            
+                            if viewModel.useBHL {
+                                Button(action: {
+                                    viewModel.loadBHLCandidates()
+                                }) {
+                                    Image(systemName: "arrow.clockwise")
+                                        .font(.caption2)
+                                        .foregroundColor(.secondary)
+                                }
+                                .buttonStyle(.plain)
+                                .disabled(viewModel.isRunning || viewModel.isLoadingBHL)
+                                .help("Refresh BHL search")
+                            }
+                        }
+                        
+                        if viewModel.useBHL {
+                            HStack {
+                                Text("Collection:")
+                                    .font(.caption)
+                                Spacer()
+                                Picker("", selection: Binding(
+                                    get: { viewModel.selectedBHLPresetID },
+                                    set: { newPreset in
+                                        if newPreset != viewModel.selectedBHLPresetID {
+                                            viewModel.proposeLayoutChange(description: "BHL Collection") {
+                                                viewModel.selectedBHLPresetID = newPreset
+                                                viewModel.loadBHLCandidates()
+                                            }
+                                        }
+                                    }
+                                )) {
+                                    ForEach(BHLSource.presets) { preset in
+                                        Label(preset.title, systemImage: preset.iconName)
+                                            .tag(preset.id)
+                                    }
+                                }
+                                .pickerStyle(.menu)
+                                .disabled(viewModel.isRunning || viewModel.isLoadingBHL)
+                            }
+                            
+                            HStack {
+                                Text("Pool Size:")
+                                    .font(.caption)
+                                Spacer()
+                                Picker("", selection: Binding(
+                                    get: { viewModel.bhlResultLimit },
+                                    set: { newLimit in
+                                        if newLimit != viewModel.bhlResultLimit {
+                                            viewModel.proposeLayoutChange(description: "BHL Pool Size to \(newLimit)") {
+                                                viewModel.bhlResultLimit = newLimit
+                                                viewModel.loadBHLCandidates()
+                                            }
+                                        }
+                                    }
+                                )) {
+                                    Text("500 plates").tag(500)
+                                    Text("1,000 plates").tag(1000)
+                                    Text("2,500 plates").tag(2500)
+                                    Text("5,000 plates").tag(5000)
+                                }
+                                .pickerStyle(.menu)
+                                .disabled(viewModel.isRunning || viewModel.isLoadingBHL)
+                            }
+                            
+                            if viewModel.selectedBHLPresetID == "custom" {
+                                HStack {
+                                    TextField("Search BHL plates...", text: $viewModel.bhlCustomQuery)
+                                        .textFieldStyle(.roundedBorder)
+                                        .font(.caption)
+                                        .disabled(viewModel.isRunning || viewModel.isLoadingBHL)
+                                        .onSubmit {
+                                            viewModel.loadBHLCandidates()
+                                        }
+                                    Button("Search") {
+                                        viewModel.loadBHLCandidates()
+                                    }
+                                    .controlSize(.small)
+                                    .disabled(viewModel.isRunning || viewModel.isLoadingBHL)
+                                }
+                            }
+                            
+                            HStack {
+                                if viewModel.isLoadingBHL {
+                                    ProgressView().controlSize(.mini)
+                                    Text("Searching BHL...")
+                                        .font(.caption2)
+                                        .foregroundColor(.secondary)
+                                } else {
+                                    Text("\(viewModel.bhlCandidateItems.count) public-domain plates")
+                                        .font(.caption2)
+                                        .foregroundColor(.secondary)
+                                }
+                                Spacer()
+                            }
+                        }
+                    }
+                    
+                    Divider()
+                    
+                    // Source 7: Paris Musées
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack {
+                            Toggle(isOn: Binding(
+                                get: { viewModel.useParisMusees },
+                                set: { newVal in
+                                    if newVal != viewModel.useParisMusees {
+                                        viewModel.proposeLayoutChange(description: "Paris Musées Source") {
+                                            viewModel.useParisMusees = newVal
+                                        }
+                                    }
+                                }
+                            )) {
+                                HStack(spacing: 4) {
+                                    Image(systemName: "building.columns.fill")
+                                        .foregroundColor(.purple)
+                                    Text("Paris Musées")
+                                        .fontWeight(.medium)
+                                }
+                            }
+                            .toggleStyle(.checkbox)
+                            .disabled(viewModel.isRunning)
+                            
+                            Spacer()
+                            
+                            if viewModel.useParisMusees {
+                                Button(action: {
+                                    viewModel.loadParisMuseesCandidates()
+                                }) {
+                                    Image(systemName: "arrow.clockwise")
+                                        .font(.caption2)
+                                        .foregroundColor(.secondary)
+                                }
+                                .buttonStyle(.plain)
+                                .disabled(viewModel.isRunning || viewModel.isLoadingParisMusees)
+                                .help("Refresh Paris search")
+                            }
+                        }
+                        
+                        if viewModel.useParisMusees {
+                            HStack {
+                                Text("Collection:")
+                                    .font(.caption)
+                                Spacer()
+                                Picker("", selection: Binding(
+                                    get: { viewModel.selectedParisMuseesPresetID },
+                                    set: { newPreset in
+                                        if newPreset != viewModel.selectedParisMuseesPresetID {
+                                            viewModel.proposeLayoutChange(description: "Paris Musées Collection") {
+                                                viewModel.selectedParisMuseesPresetID = newPreset
+                                                viewModel.loadParisMuseesCandidates()
+                                            }
+                                        }
+                                    }
+                                )) {
+                                    ForEach(ParisMuseesSource.presets) { preset in
+                                        Label(preset.title, systemImage: preset.iconName)
+                                            .tag(preset.id)
+                                    }
+                                }
+                                .pickerStyle(.menu)
+                                .disabled(viewModel.isRunning || viewModel.isLoadingParisMusees)
+                            }
+                            
+                            HStack {
+                                Text("Pool Size:")
+                                    .font(.caption)
+                                Spacer()
+                                Picker("", selection: Binding(
+                                    get: { viewModel.parisMuseesResultLimit },
+                                    set: { newLimit in
+                                        if newLimit != viewModel.parisMuseesResultLimit {
+                                            viewModel.proposeLayoutChange(description: "Paris Pool Size to \(newLimit)") {
+                                                viewModel.parisMuseesResultLimit = newLimit
+                                                viewModel.loadParisMuseesCandidates()
+                                            }
+                                        }
+                                    }
+                                )) {
+                                    Text("500 artworks").tag(500)
+                                    Text("1,000 artworks").tag(1000)
+                                    Text("2,500 artworks").tag(2500)
+                                    Text("5,000 artworks").tag(5000)
+                                }
+                                .pickerStyle(.menu)
+                                .disabled(viewModel.isRunning || viewModel.isLoadingParisMusees)
+                            }
+                            
+                            if viewModel.selectedParisMuseesPresetID == "custom" {
+                                HStack {
+                                    TextField("Search Paris collections...", text: $viewModel.parisMuseesCustomQuery)
+                                        .textFieldStyle(.roundedBorder)
+                                        .font(.caption)
+                                        .disabled(viewModel.isRunning || viewModel.isLoadingParisMusees)
+                                        .onSubmit {
+                                            viewModel.loadParisMuseesCandidates()
+                                        }
+                                    Button("Search") {
+                                        viewModel.loadParisMuseesCandidates()
+                                    }
+                                    .controlSize(.small)
+                                    .disabled(viewModel.isRunning || viewModel.isLoadingParisMusees)
+                                }
+                            }
+                            
+                            HStack {
+                                if viewModel.isLoadingParisMusees {
+                                    ProgressView().controlSize(.mini)
+                                    Text("Searching Paris Musées...")
+                                        .font(.caption2)
+                                        .foregroundColor(.secondary)
+                                } else {
+                                    Text("\(viewModel.parisMuseesCandidateItems.count) artworks & prints")
+                                        .font(.caption2)
+                                        .foregroundColor(.secondary)
+                                }
+                                Spacer()
+                            }
+                        }
+                    }
+                    
+                    Divider()
+                    
+                    // Source 8: Smithsonian Open Access
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack {
+                            Toggle(isOn: Binding(
+                                get: { viewModel.useSmithsonian },
+                                set: { newVal in
+                                    if newVal != viewModel.useSmithsonian {
+                                        viewModel.proposeLayoutChange(description: "Smithsonian Source") {
+                                            viewModel.useSmithsonian = newVal
+                                        }
+                                    }
+                                }
+                            )) {
+                                HStack(spacing: 4) {
+                                    Image(systemName: "sparkles")
+                                        .foregroundColor(.orange)
+                                    Text("Smithsonian Open Access")
+                                        .fontWeight(.medium)
+                                }
+                            }
+                            .toggleStyle(.checkbox)
+                            .disabled(viewModel.isRunning)
+                            
+                            Spacer()
+                            
+                            if viewModel.useSmithsonian {
+                                Button(action: {
+                                    viewModel.loadSmithsonianCandidates()
+                                }) {
+                                    Image(systemName: "arrow.clockwise")
+                                        .font(.caption2)
+                                        .foregroundColor(.secondary)
+                                }
+                                .buttonStyle(.plain)
+                                .disabled(viewModel.isRunning || viewModel.isLoadingSmithsonian)
+                                .help("Refresh Smithsonian search")
+                            }
+                        }
+                        
+                        if viewModel.useSmithsonian {
+                            HStack {
+                                Text("Collection:")
+                                    .font(.caption)
+                                Spacer()
+                                Picker("", selection: Binding(
+                                    get: { viewModel.selectedSmithsonianPresetID },
+                                    set: { newPreset in
+                                        if newPreset != viewModel.selectedSmithsonianPresetID {
+                                            viewModel.proposeLayoutChange(description: "Smithsonian Collection") {
+                                                viewModel.selectedSmithsonianPresetID = newPreset
+                                                viewModel.loadSmithsonianCandidates()
+                                            }
+                                        }
+                                    }
+                                )) {
+                                    ForEach(SmithsonianSource.presets) { preset in
+                                        Label(preset.title, systemImage: preset.iconName)
+                                            .tag(preset.id)
+                                    }
+                                }
+                                .pickerStyle(.menu)
+                                .disabled(viewModel.isRunning || viewModel.isLoadingSmithsonian)
+                            }
+                            
+                            HStack {
+                                Text("Pool Size:")
+                                    .font(.caption)
+                                Spacer()
+                                Picker("", selection: Binding(
+                                    get: { viewModel.smithsonianResultLimit },
+                                    set: { newLimit in
+                                        if newLimit != viewModel.smithsonianResultLimit {
+                                            viewModel.proposeLayoutChange(description: "Smithsonian Pool Size to \(newLimit)") {
+                                                viewModel.smithsonianResultLimit = newLimit
+                                                viewModel.loadSmithsonianCandidates()
+                                            }
+                                        }
+                                    }
+                                )) {
+                                    Text("500 items").tag(500)
+                                    Text("1,000 items").tag(1000)
+                                    Text("2,500 items").tag(2500)
+                                    Text("5,000 items").tag(5000)
+                                }
+                                .pickerStyle(.menu)
+                                .disabled(viewModel.isRunning || viewModel.isLoadingSmithsonian)
+                            }
+                            
+                            if viewModel.selectedSmithsonianPresetID == "custom" {
+                                HStack {
+                                    TextField("Search Smithsonian...", text: $viewModel.smithsonianCustomQuery)
+                                        .textFieldStyle(.roundedBorder)
+                                        .font(.caption)
+                                        .disabled(viewModel.isRunning || viewModel.isLoadingSmithsonian)
+                                        .onSubmit {
+                                            viewModel.loadSmithsonianCandidates()
+                                        }
+                                    Button("Search") {
+                                        viewModel.loadSmithsonianCandidates()
+                                    }
+                                    .controlSize(.small)
+                                    .disabled(viewModel.isRunning || viewModel.isLoadingSmithsonian)
+                                }
+                            }
+                            
+                            HStack {
+                                if viewModel.isLoadingSmithsonian {
+                                    ProgressView().controlSize(.mini)
+                                    Text("Searching Smithsonian...")
+                                        .font(.caption2)
+                                        .foregroundColor(.secondary)
+                                } else {
+                                    Text("\(viewModel.smithsonianCandidateItems.count) Open Access items")
+                                        .font(.caption2)
+                                        .foregroundColor(.secondary)
+                                }
+                                Spacer()
+                            }
+                        }
+                    }
                         
                         Divider()
                         

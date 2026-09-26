@@ -97,11 +97,55 @@ public final class ImageLoader: @unchecked Sendable {
         guard let thumbImage = CGImageSourceCreateThumbnailAtIndex(source, 0, thumbOptions as CFDictionary) else {
             return nil
         }
-        
-        return extractRGBABytes(from: thumbImage, width: targetSize, height: targetSize)
+        return Self.extractRGBABytes(from: thumbImage, width: targetSize, height: targetSize)
     }
     
-    private func extractRGBABytes(from cgImage: CGImage, width: Int, height: Int) -> Data? {
+    /// Loads a 16x16 RGBA thumbnail from an image Data buffer using ImageIO.
+    public func loadThumbnail(from data: Data, targetSize: Int = 16) -> Data? {
+        let options: [CFString: Any] = [
+            kCGImageSourceShouldCache: false
+        ]
+        guard let source = CGImageSourceCreateWithData(data as CFData, options as CFDictionary) else {
+            return nil
+        }
+        let thumbOptions: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceThumbnailMaxPixelSize: targetSize,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceShouldCacheImmediately: true
+        ]
+        guard let thumbImage = CGImageSourceCreateThumbnailAtIndex(source, 0, thumbOptions as CFDictionary) else {
+            return nil
+        }
+        return Self.extractRGBABytes(from: thumbImage, width: targetSize, height: targetSize)
+    }
+    
+    /// Decodes a CGImage from raw data, optionally constraining max pixel dimensions.
+    public func decodeImage(from data: Data, maxPixelSize: Int? = nil) -> CGImage? {
+        let options: [CFString: Any] = [
+            kCGImageSourceShouldCache: false
+        ]
+        guard let source = CGImageSourceCreateWithData(data as CFData, options as CFDictionary) else {
+            return nil
+        }
+        if let maxDim = maxPixelSize {
+            let thumbOptions: [CFString: Any] = [
+                kCGImageSourceCreateThumbnailFromImageAlways: true,
+                kCGImageSourceThumbnailMaxPixelSize: maxDim,
+                kCGImageSourceCreateThumbnailWithTransform: true,
+                kCGImageSourceShouldCacheImmediately: true
+            ]
+            return CGImageSourceCreateThumbnailAtIndex(source, 0, thumbOptions as CFDictionary)
+        } else {
+            let loadOpts: [CFString: Any] = [
+                kCGImageSourceCreateThumbnailFromImageAlways: false,
+                kCGImageSourceShouldCacheImmediately: true
+            ]
+            return CGImageSourceCreateImageAtIndex(source, 0, loadOpts as CFDictionary)
+        }
+    }
+    
+    public static func extractRGBABytes(from cgImage: CGImage, width: Int, height: Int) -> Data? {
         let bytesPerRow = width * 4
         var buffer = [UInt8](repeating: 0, count: width * height * 4)
         
