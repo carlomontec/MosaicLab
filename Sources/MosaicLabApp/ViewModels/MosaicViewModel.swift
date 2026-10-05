@@ -787,6 +787,35 @@ public final class MosaicViewModel: ObservableObject {
         statusMessage = "Stopped"
     }
     
+    // MARK: - Canvas Preview Refresh
+    public func refreshPreview() {
+        guard !isRunning, let engine = self.engine else { return }
+        statusMessage = "Refreshing preview..."
+        
+        let matchedURLs = Array(Set(engine.tiles.compactMap { $0.bestImageURL }))
+        guard !matchedURLs.isEmpty else {
+            self.canvasVersion += 1
+            statusMessage = "Preview refreshed."
+            return
+        }
+        
+        Task.detached(priority: .userInitiated) { [weak self] in
+            // Parallel preheating across all CPU cores
+            await withTaskGroup(of: Void.self) { group in
+                for url in matchedURLs {
+                    group.addTask {
+                        MosaicThumbnailCache.shared.preheatThumbnail(for: url, maxPixelSize: 256)
+                    }
+                }
+            }
+            await MainActor.run { [weak self] in
+                guard let self = self else { return }
+                self.canvasVersion += 1
+                self.statusMessage = "Preview refreshed (\(matchedURLs.count) photos)."
+            }
+        }
+    }
+    
     // MARK: - Single-Tile Substitution
     public func findSubstitute(for tile: MosaicTile) {
         guard let engine = self.engine else { return }
@@ -1143,10 +1172,10 @@ public final class MosaicViewModel: ObservableObject {
                 } else {
                     let fn = String(format: "thumb_%05d.heic", thumbCounter)
                     thumbCounter += 1
-                    pathToThumbFile[path] = fn
-                    thumbFilename = fn
                     if let thumb = MosaicThumbnailCache.shared.thumbnail(for: imageURL, maxPixelSize: 256) {
                         uniqueThumbnails[fn] = thumb
+                        pathToThumbFile[path] = fn
+                        thumbFilename = fn
                     }
                 }
             }
@@ -1367,6 +1396,7 @@ public final class MosaicViewModel: ObservableObject {
                 
                 var restoredCount = 0
                 var uniquePaths = Set<String>()
+                var missingThumbURLs: [URL] = []
                 for record in project.tiles {
                     if record.index >= 0 && record.index < newEngine.tiles.count,
                        let path = record.imagePath {
@@ -1381,6 +1411,8 @@ public final class MosaicViewModel: ObservableObject {
                         // Seed thumbnail cache immediately if embedded in bundle!
                         if let thumbFile = record.thumbnailFile, let thumbImg = bundle.thumbnails[thumbFile] {
                             MosaicThumbnailCache.shared.setThumbnail(thumbImg, for: tileURL)
+                        } else {
+                            missingThumbURLs.append(tileURL)
                         }
                     }
                 }
@@ -1389,15 +1421,16 @@ public final class MosaicViewModel: ObservableObject {
                     await MainActor.run { [weak self] in
                         self?.appendLoadingLog("Loaded \(bundle.thumbnails.count) embedded thumbnails (Instant cache)...", progress: 0.90)
                     }
-                } else {
-                    let uniqueURLs = uniquePaths.map { URL(fileURLWithPath: $0) }
+                }
+                
+                // Pre-heat any missing thumbnails across all CPU cores from source files
+                let uniqueMissing = Array(Set(missingThumbURLs))
+                if !uniqueMissing.isEmpty {
                     await MainActor.run { [weak self] in
-                        self?.appendLoadingLog("Caching \(uniqueURLs.count) thumbnails across CPU cores...", progress: 0.85)
+                        self?.appendLoadingLog("Preheating \(uniqueMissing.count) thumbnails across CPU cores...", progress: 0.92)
                     }
-                    
-                    // Parallel preheating of unique thumbnails across all CPU cores for legacy projects
                     await withTaskGroup(of: Void.self) { group in
-                        for url in uniqueURLs {
+                        for url in uniqueMissing {
                             group.addTask {
                                 MosaicThumbnailCache.shared.preheatThumbnail(for: url, maxPixelSize: 256)
                             }

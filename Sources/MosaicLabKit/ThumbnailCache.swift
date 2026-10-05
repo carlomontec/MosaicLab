@@ -7,26 +7,33 @@ import ImageIO
 public final class MosaicThumbnailCache: @unchecked Sendable {
     public static let shared = MosaicThumbnailCache()
     
-    private let cache = NSCache<NSURL, CGImage>()
+    private let cache = NSCache<NSString, CGImage>()
     private let transferredCache = NSCache<NSString, CGImage>()
-    private let sourceStatsCache = NSCache<NSURL, ColorStatisticsBox>()
+    private let sourceStatsCache = NSCache<NSString, ColorStatisticsBox>()
     
     public init() {
-        cache.countLimit = 4000
-        cache.totalCostLimit = 150 * 1024 * 1024 // 150 MB max RAM
-        transferredCache.countLimit = 3000
-        transferredCache.totalCostLimit = 100 * 1024 * 1024 // 100 MB max RAM
-        sourceStatsCache.countLimit = 4000
+        cache.countLimit = 10000
+        cache.totalCostLimit = 512 * 1024 * 1024 // 512 MB max RAM (safe for 16 GB M3)
+        transferredCache.countLimit = 8000
+        transferredCache.totalCostLimit = 256 * 1024 * 1024 // 256 MB max RAM
+        sourceStatsCache.countLimit = 10000
+    }
+    
+    private func cacheKey(for url: URL) -> NSString {
+        if url.isFileURL {
+            return url.standardizedFileURL.path as NSString
+        }
+        return url.absoluteString as NSString
     }
     
     public func setThumbnail(_ image: CGImage, for url: URL) {
-        let key = url as NSURL
+        let key = cacheKey(for: url)
         let cost = image.bytesPerRow * image.height
         cache.setObject(image, forKey: key, cost: cost)
     }
     
     public func thumbnail(for url: URL, maxPixelSize: Int = 256) -> CGImage? {
-        let key = url as NSURL
+        let key = cacheKey(for: url)
         if let cached = cache.object(forKey: key) {
             return cached
         }
@@ -76,8 +83,9 @@ public final class MosaicThumbnailCache: @unchecked Sendable {
             return nil
         }
         
+        let baseKey = cacheKey(for: url) as String
         if isMonochrome && (targetStats == nil || colorTransferStrength <= 0.001) {
-            let key = "\(url.path)#mono" as NSString
+            let key = "\(baseKey)#mono" as NSString
             if let cached = transferredCache.object(forKey: key) {
                 return cached
             }
@@ -94,19 +102,19 @@ public final class MosaicThumbnailCache: @unchecked Sendable {
         // Quantize strength to 5% intervals to maximize cache hits while dragging the slider
         let quantizedPct = Int(round(colorTransferStrength * 20.0)) * 5
         let monoSuffix = isMonochrome ? "#mono" : ""
-        let key = "\(url.path)#\(Int(stats.meanL * 1000))_\(Int(stats.meanA * 1000))_\(Int(stats.meanB * 1000))#\(quantizedPct)\(monoSuffix)" as NSString
+        let key = "\(baseKey)#\(Int(stats.meanL * 1000))_\(Int(stats.meanA * 1000))_\(Int(stats.meanB * 1000))#\(quantizedPct)\(monoSuffix)" as NSString
         if let cached = transferredCache.object(forKey: key) {
             return cached
         }
         
         // Fetch or lazily compute and cache candidate's own source color statistics
-        let urlKey = url as NSURL
+        let statsKey = baseKey as NSString
         let srcStats: ColorStatistics
-        if let cachedStats = sourceStatsCache.object(forKey: urlKey) {
+        if let cachedStats = sourceStatsCache.object(forKey: statsKey) {
             srcStats = cachedStats.value
         } else {
             srcStats = ColorTransfer.computeStatistics(from: base)
-            sourceStatsCache.setObject(ColorStatisticsBox(srcStats), forKey: urlKey)
+            sourceStatsCache.setObject(ColorStatisticsBox(srcStats), forKey: statsKey)
         }
         
         var effectiveStats = stats

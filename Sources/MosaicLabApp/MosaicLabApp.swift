@@ -136,6 +136,14 @@ struct MosaicLabApp: App {
                 .keyboardShortcut("e", modifiers: [.command])
                 .disabled(!viewModel.hasCompletedTiles || viewModel.isExporting || viewModel.isLoadingProject)
             }
+            
+            CommandGroup(after: .toolbar) {
+                Button("Refresh Canvas Preview") {
+                    viewModel.refreshPreview()
+                }
+                .keyboardShortcut("r", modifiers: [.command, .shift])
+                .disabled(viewModel.isRunning || viewModel.engine == nil)
+            }
         }
         #else
         WindowGroup {

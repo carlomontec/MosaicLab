@@ -176,6 +176,21 @@ public struct MosaicCanvasView: View {
                                 }
                             }
                             .help("Reinhard Perceptual Color Transfer: statistically harmonizes photo colors with the target image")
+                            
+                            Divider()
+                                .frame(height: 16)
+                            
+                            // Refresh Preview Button
+                            Button(action: {
+                                viewModel.refreshPreview()
+                            }) {
+                                Image(systemName: "arrow.clockwise")
+                                    .font(.caption)
+                                    .foregroundColor(viewModel.isRunning ? .secondary.opacity(0.3) : .secondary)
+                            }
+                            .buttonStyle(.plain)
+                            .disabled(viewModel.isRunning)
+                            .help(viewModel.isRunning ? "Matching in progress..." : "Refresh Preview (re-cache thumbnails)")
                         }
                         .padding(.horizontal, 14)
                         .padding(.vertical, 8)
@@ -410,31 +425,38 @@ private final class NSMosaicView: NSView {
             ctx.fill(CGRect(origin: .zero, size: mSize))
         }
         
+        var missingThumbnailURLs: [URL] = []
         for tile in engine.tiles {
-            if let imageURL = tile.bestImageURL {
-                ctx.saveGState()
-                ctx.addPath(tile.geometry.outline)
-                ctx.clip()
-                
-                let targetStats = (transferStrength > 0.001) ? tile.targetColorStatistics : nil
-                if let cgImg = MosaicThumbnailCache.shared.thumbnail(
-                    for: imageURL,
-                    targetStats: targetStats,
-                    colorTransferStrength: transferStrength,
-                    isMonochrome: isMono
-                ) {
-                    let b = tile.geometry.bounds
-                    let imgW = CGFloat(cgImg.width)
-                    let imgH = CGFloat(cgImg.height)
-                    let fillScale = max(b.width / imgW, b.height / imgH)
-                    let drawW = imgW * fillScale
-                    let drawH = imgH * fillScale
-                    let drawX = b.midX - drawW / 2.0
-                    let drawY = b.midY - drawH / 2.0
+            autoreleasepool {
+                if let imageURL = tile.bestImageURL {
+                    ctx.saveGState()
+                    ctx.addPath(tile.geometry.outline)
+                    ctx.clip()
                     
-                    drawUprightImage(cgImg, in: CGRect(x: drawX, y: drawY, width: drawW, height: drawH), in: ctx)
+                    let targetStats = (transferStrength > 0.001) ? tile.targetColorStatistics : nil
+                    if let cgImg = MosaicThumbnailCache.shared.thumbnail(
+                        for: imageURL,
+                        targetStats: targetStats,
+                        colorTransferStrength: transferStrength,
+                        isMonochrome: isMono
+                    ) {
+                        let b = tile.geometry.bounds
+                        let imgW = CGFloat(cgImg.width)
+                        let imgH = CGFloat(cgImg.height)
+                        let fillScale = max(b.width / imgW, b.height / imgH)
+                        let drawW = imgW * fillScale
+                        let drawH = imgH * fillScale
+                        let drawX = b.midX - drawW / 2.0
+                        let drawY = b.midY - drawH / 2.0
+                        
+                        drawUprightImage(cgImg, in: CGRect(x: drawX, y: drawY, width: drawW, height: drawH), in: ctx)
+                    } else {
+                        // Fallback: draw target image seamlessly in tile region while thumbnail loads
+                        drawUprightImage(displayTarget, in: CGRect(origin: .zero, size: mSize), in: ctx)
+                        missingThumbnailURLs.append(imageURL)
+                    }
+                    ctx.restoreGState()
                 }
-                ctx.restoreGState()
             }
             
             if strokeW > 0.01 {
@@ -652,30 +674,37 @@ private final class UIMosaicView: UIView {
             ctx.fill(CGRect(origin: .zero, size: mSize))
         }
         
+        var missingThumbnailURLs: [URL] = []
         for tile in engine.tiles {
-            if let imageURL = tile.bestImageURL {
-                ctx.saveGState()
-                ctx.addPath(tile.geometry.outline)
-                ctx.clip()
-                
-                let targetStats = (transferStrength > 0.001) ? tile.targetColorStatistics : nil
-                if let cgImg = MosaicThumbnailCache.shared.thumbnail(
-                    for: imageURL,
-                    targetStats: targetStats,
-                    colorTransferStrength: transferStrength,
-                    isMonochrome: isMono
-                ) {
-                    let b = tile.geometry.bounds
-                    let imgW = CGFloat(cgImg.width)
-                    let imgH = CGFloat(cgImg.height)
-                    let fillScale = max(b.width / imgW, b.height / imgH)
-                    let drawW = imgW * fillScale
-                    let drawH = imgH * fillScale
-                    let drawX = b.midX - drawW / 2.0
-                    let drawY = b.midY - drawH / 2.0
-                    drawUprightImage(cgImg, in: CGRect(x: drawX, y: drawY, width: drawW, height: drawH), in: ctx)
+            autoreleasepool {
+                if let imageURL = tile.bestImageURL {
+                    ctx.saveGState()
+                    ctx.addPath(tile.geometry.outline)
+                    ctx.clip()
+                    
+                    let targetStats = (transferStrength > 0.001) ? tile.targetColorStatistics : nil
+                    if let cgImg = MosaicThumbnailCache.shared.thumbnail(
+                        for: imageURL,
+                        targetStats: targetStats,
+                        colorTransferStrength: transferStrength,
+                        isMonochrome: isMono
+                    ) {
+                        let b = tile.geometry.bounds
+                        let imgW = CGFloat(cgImg.width)
+                        let imgH = CGFloat(cgImg.height)
+                        let fillScale = max(b.width / imgW, b.height / imgH)
+                        let drawW = imgW * fillScale
+                        let drawH = imgH * fillScale
+                        let drawX = b.midX - drawW / 2.0
+                        let drawY = b.midY - drawH / 2.0
+                        drawUprightImage(cgImg, in: CGRect(x: drawX, y: drawY, width: drawW, height: drawH), in: ctx)
+                    } else {
+                        // Fallback: draw target image seamlessly in tile region while thumbnail loads
+                        drawUprightImage(displayTarget, in: CGRect(origin: .zero, size: mSize), in: ctx)
+                        missingThumbnailURLs.append(imageURL)
+                    }
+                    ctx.restoreGState()
                 }
-                ctx.restoreGState()
             }
             
             if strokeW > 0.01 {

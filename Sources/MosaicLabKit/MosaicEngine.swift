@@ -26,6 +26,7 @@ public final class MosaicEngine: @unchecked Sendable {
     
     public private(set) var tiles: [MosaicTile] = []
     private var preparedTiles: [PreparedTile] = []
+    public private(set) var planarStore: PlanarTileStore?
     public private(set) var mosaicSize: CGSize = .zero
     public private(set) var targetImage: CGImage?
     
@@ -185,6 +186,8 @@ public final class MosaicEngine: @unchecked Sendable {
                 gridY: tile.geometry.gridY
             )
         }
+        
+        self.planarStore = PlanarTileStore(tiles: tileArray, metric: self.metric, edgeWeight: self.edgeWeight)
         progressHandler?(1.0, "Generated \(totalCount) tile shapes.")
     }
     
@@ -229,9 +232,22 @@ public final class MosaicEngine: @unchecked Sendable {
             }
         }
         
-        let pTiles = self.preparedTiles
-        let pTileCount = pTiles.count
-        guard pTileCount > 0 else { return false }
+        if self.planarStore == nil && !self.tiles.isEmpty {
+            self.planarStore = PlanarTileStore(tiles: self.tiles, metric: self.metric, edgeWeight: self.edgeWeight)
+        }
+        guard let store = self.planarStore else { return false }
+        
+        let keepTopK = (maxReuse > 0 || minDistance > 0) ? 8 : 1
+        let currentBestScores = tiles.map { $0.bestScore }
+        
+        let simdTiles = FastTileMatcher.match(
+            store: store,
+            candidates: candidates,
+            metric: self.metric,
+            edgeWeight: self.edgeWeight,
+            currentBestScores: currentBestScores,
+            keepTopK: keepTopK
+        )
         
         struct CandidateMatch {
             let tileIndex: Int
@@ -239,71 +255,10 @@ public final class MosaicEngine: @unchecked Sendable {
             let score: Float
         }
         
-        let matcher = MosaicMatcher.shared()
-        let metric = self.metric
-        let edgeWeight = self.edgeWeight
-        let candidatesCount = candidates.count
-        
         var allMatches: [CandidateMatch] = []
-        let matchLock = NSLock()
-        
-        // Concurrent evaluation across all CPU cores (Multi-Core dispatch)
-        DispatchQueue.concurrentPerform(iterations: candidatesCount) { cIdx in
-            let cand = candidates[cIdx]
-            
-            cand.thumbnailPixels.withUnsafeBytes { candRawBuffer in
-                guard let candBytes = candRawBuffer.baseAddress?.assumingMemoryBound(to: UInt8.self) else { return }
-                
-                var localMatches: [CandidateMatch] = []
-                localMatches.reserveCapacity(32)
-                
-                for tIdx in 0..<pTileCount {
-                    let pTile = pTiles[tIdx]
-                    let currentBest = self.tiles[pTile.tileIndex].bestScore
-                    
-                    // Hierarchical early rejection:
-                    // If the mean RGB distance is already >= currentBest, skip full evaluation!
-                    if edgeWeight <= 0.001 && metric == .rgb {
-                        let dR = pTile.meanR - cand.meanR
-                        let dG = pTile.meanG - cand.meanG
-                        let dB = pTile.meanB - cand.meanB
-                        let meanDistSq = dR * dR + dG * dG + dB * dB
-                        let minBoundScore = meanDistSq * (1.0 / (255.0 * 255.0 * 3.0))
-                        if minBoundScore >= currentBest {
-                            continue // Mathematically cannot beat currentBest!
-                        }
-                    }
-                    
-                    pTile.targetBytes.withUnsafeBufferPointer { tBuf in
-                        pTile.maskBytes.withUnsafeBufferPointer { mBuf in
-                            guard let targetBytes = tBuf.baseAddress,
-                                  let maskBytes = mBuf.baseAddress else { return }
-                            
-                            let score = matcher.compareTargetPixels(
-                                targetBytes,
-                                targetEdgeDesc: pTile.edgeDescriptor,
-                                candidatePixels: candBytes,
-                                candidateEdgeDesc: cand.edgeDescriptor,
-                                maskPixels: maskBytes,
-                                totalMaskWeight: pTile.totalWeight,
-                                width: 16,
-                                height: 16,
-                                metric: metric,
-                                edgeWeight: edgeWeight
-                            )
-                            
-                            if score < currentBest {
-                                localMatches.append(CandidateMatch(tileIndex: pTile.tileIndex, candidateIndex: cIdx, score: score))
-                            }
-                        }
-                    }
-                }
-                
-                if !localMatches.isEmpty {
-                    matchLock.lock()
-                    allMatches.append(contentsOf: localMatches)
-                    matchLock.unlock()
-                }
+        for (tIdx, results) in simdTiles.enumerated() {
+            for res in results {
+                allMatches.append(CandidateMatch(tileIndex: tIdx, candidateIndex: Int(res.candidateIndex), score: res.score))
             }
         }
         
@@ -314,6 +269,7 @@ public final class MosaicEngine: @unchecked Sendable {
         
         var anyUpdated = false
         let minDistSq = minDistance * minDistance
+        var winnerURLs: Set<URL> = []
         
         for match in allMatches {
             let tile = tiles[match.tileIndex]
@@ -362,8 +318,15 @@ public final class MosaicEngine: @unchecked Sendable {
             }
             candidateTileLocations[cand.identifier]?.insert(match.tileIndex)
             
+            winnerURLs.insert(cand.url)
             anyUpdated = true
             onTileUpdated?(match.tileIndex)
+        }
+        
+        if anyUpdated && !winnerURLs.isEmpty {
+            for url in winnerURLs {
+                MosaicThumbnailCache.shared.preheatThumbnail(for: url, maxPixelSize: 256)
+            }
         }
         
         return anyUpdated
