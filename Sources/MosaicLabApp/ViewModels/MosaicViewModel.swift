@@ -855,6 +855,10 @@ public final class MosaicViewModel: ObservableObject {
             let finalMisses = totalCacheMisses
             let hitRate = (finalHits + finalMisses > 0) ? Int(Double(finalHits) / Double(finalHits + finalMisses) * 100.0) : 0
             
+            if finalMisses > 0 {
+                SourceCandidateCache.shared.pruneDiskIfNeeded()
+            }
+            
             await MainActor.run { [weak self] in
                 guard let self = self else { return }
                 self.isRunning = false
@@ -918,11 +922,12 @@ public final class MosaicViewModel: ObservableObject {
         }
         
         Task.detached(priority: .userInitiated) { [weak self] in
-            // Parallel preheating across all CPU cores
+            MosaicThumbnailCache.shared.clearTransferred()
+            // Parallel refresh and preheating across all CPU cores
             await withTaskGroup(of: Void.self) { group in
                 for url in matchedURLs {
                     group.addTask {
-                        MosaicThumbnailCache.shared.preheatThumbnail(for: url, maxPixelSize: 256)
+                        MosaicThumbnailCache.shared.refreshThumbnail(for: url, maxPixelSize: 256)
                     }
                 }
             }
@@ -1283,8 +1288,10 @@ public final class MosaicViewModel: ObservableObject {
         tileRecords.reserveCapacity(engine.tiles.count)
         for (idx, tile) in engine.tiles.enumerated() {
             var thumbFilename: String? = nil
+            var savedPath: String? = nil
             if let imageURL = tile.bestImageURL {
-                let path = imageURL.path
+                let path = imageURL.isFileURL ? imageURL.path : imageURL.absoluteString
+                savedPath = path
                 if let existing = pathToThumbFile[path] {
                     thumbFilename = existing
                 } else {
@@ -1300,7 +1307,7 @@ public final class MosaicViewModel: ObservableObject {
             tileRecords.append(
                 MosaicLabProject.TileMatchRecord(
                     index: idx,
-                    imagePath: tile.bestImageURL?.path,
+                    imagePath: savedPath,
                     score: tile.bestScore,
                     thumbnailFile: thumbFilename
                 )
@@ -1512,6 +1519,7 @@ public final class MosaicViewModel: ObservableObject {
                     self?.appendLoadingLog("Restoring tile match history (\(project.tiles.count) records)...", progress: 0.80)
                 }
                 
+                MosaicThumbnailCache.shared.clearTransferred()
                 var restoredCount = 0
                 var uniquePaths = Set<String>()
                 var missingThumbURLs: [URL] = []
@@ -1520,7 +1528,12 @@ public final class MosaicViewModel: ObservableObject {
                        let path = record.imagePath {
                         let tile = newEngine.tiles[record.index]
                         tile.bestImageIdentifier = path
-                        let tileURL = URL(fileURLWithPath: path)
+                        let tileURL: URL
+                        if path.hasPrefix("applephotos://"), let u = URL(string: path) {
+                            tileURL = u
+                        } else {
+                            tileURL = URL(fileURLWithPath: path)
+                        }
                         tile.bestImageURL = tileURL
                         tile.bestScore = record.score
                         restoredCount += 1

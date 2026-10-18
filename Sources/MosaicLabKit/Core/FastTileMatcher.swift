@@ -109,9 +109,8 @@ public final class FastTileMatcher {
                             
                             let lb: Float
                             if isMono {
-                                // Mono uses Luma for pruning approximation, but we can just use RGB for a safer bound or implement mono pruning
-                                // Fallback to RGB pruning
-                                lb = (dR * dR + dG * dG + dB * dB).sum() * 16.0 * inv * ef
+                                let dY = 0.2126 * dR + 0.7152 * dG + 0.0722 * dB
+                                lb = (dY * dY).sum() * 16.0 * inv * ef
                             } else {
                                 lb = (lbScale * (dR * dR + dB * dB) + gScale * dG * dG).sum() * 16.0 * inv * ef
                             }

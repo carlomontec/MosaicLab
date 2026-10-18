@@ -46,10 +46,19 @@ public final class MosaicThumbnailCache: @unchecked Sendable {
         return diskCacheURL.appendingPathComponent("\(diskKey(for: url, maxPixelSize: maxPixelSize)).jpg")
     }
     
-    public func setThumbnail(_ image: CGImage, for url: URL) {
+    public func setThumbnail(_ image: CGImage, for url: URL, maxPixelSize: Int = 256) {
         let key = cacheKey(for: url)
         let cost = image.bytesPerRow * image.height
         cache.setObject(image, forKey: key, cost: cost)
+        transferredCache.removeObject(forKey: "\(key)#mono" as NSString)
+        sourceStatsCache.removeObject(forKey: key)
+        
+        let diskFile = diskFileURL(for: url, maxPixelSize: maxPixelSize)
+        if !fileManager.fileExists(atPath: diskFile.path) {
+            Task.detached(priority: .utility) {
+                self.saveJPEG(image, to: diskFile)
+            }
+        }
     }
     
     public func thumbnail(for url: URL, maxPixelSize: Int = 256) -> CGImage? {
@@ -202,6 +211,20 @@ public final class MosaicThumbnailCache: @unchecked Sendable {
     
     public func preheatThumbnail(for url: URL, maxPixelSize: Int = 256) {
         _ = thumbnail(for: url, maxPixelSize: maxPixelSize)
+    }
+    
+    public func refreshThumbnail(for url: URL, maxPixelSize: Int = 256) {
+        let key = cacheKey(for: url)
+        let diskFile = diskFileURL(for: url, maxPixelSize: maxPixelSize)
+        if fileManager.fileExists(atPath: diskFile.path) || (url.isFileURL && fileManager.fileExists(atPath: url.path)) {
+            cache.removeObject(forKey: key)
+        }
+        _ = thumbnail(for: url, maxPixelSize: maxPixelSize)
+    }
+    
+    public func clearTransferred() {
+        transferredCache.removeAllObjects()
+        sourceStatsCache.removeAllObjects()
     }
     
     public func clear() {

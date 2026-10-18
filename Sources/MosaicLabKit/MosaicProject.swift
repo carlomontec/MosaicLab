@@ -329,13 +329,19 @@ public final class MosaicProjectManager: @unchecked Sendable {
                 targetImg = Self.readCGImage(from: targetPath)
             }
             
-            // Extract embedded thumbnails
+            // Extract embedded thumbnails in parallel across CPU cores
             var loadedThumbnails: [String: CGImage] = [:]
             let thumbsDir = baseDir.appendingPathComponent("Thumbnails")
-            if let files = try? fileManager.contentsOfDirectory(at: thumbsDir, includingPropertiesForKeys: nil) {
-                for fileURL in files {
+            if let files = try? fileManager.contentsOfDirectory(at: thumbsDir, includingPropertiesForKeys: nil), !files.isEmpty {
+                loadedThumbnails.reserveCapacity(files.count)
+                let lock = NSLock()
+                DispatchQueue.concurrentPerform(iterations: files.count) { idx in
+                    let fileURL = files[idx]
                     if let img = Self.readCGImage(from: fileURL) {
-                        loadedThumbnails[fileURL.lastPathComponent] = img
+                        let name = fileURL.lastPathComponent
+                        lock.lock()
+                        loadedThumbnails[name] = img
+                        lock.unlock()
                     }
                 }
             }
@@ -376,8 +382,15 @@ public final class MosaicProjectManager: @unchecked Sendable {
     }
     
     public static func readCGImage(from url: URL) -> CGImage? {
-        let opts: [CFString: Any] = [kCGImageSourceShouldCache: false]
-        guard let src = CGImageSourceCreateWithURL(url as CFURL, opts as CFDictionary) else { return nil }
-        return CGImageSourceCreateImageAtIndex(src, 0, nil)
+        guard let data = try? Data(contentsOf: url) else { return nil }
+        let opts: [CFString: Any] = [
+            kCGImageSourceShouldCache: true,
+            kCGImageSourceShouldCacheImmediately: true
+        ]
+        guard let src = CGImageSourceCreateWithData(data as CFData, opts as CFDictionary),
+              let rawImg = CGImageSourceCreateImageAtIndex(src, 0, opts as CFDictionary) else {
+            return nil
+        }
+        return MosaicEngine.normalizeToStandardSRGB(rawImg)
     }
 }

@@ -22,7 +22,13 @@ public final class MosaicEngine: @unchecked Sendable {
     public let tilesDown: Int
     public let maxReuse: Int
     public let minDistance: Int
-    public var metric: MosaicColorMetric
+    public var metric: MosaicColorMetric {
+        didSet {
+            if metric != oldValue {
+                planarStore = nil
+            }
+        }
+    }
     
     public private(set) var tiles: [MosaicTile] = []
     private var preparedTiles: [PreparedTile] = []
@@ -43,7 +49,13 @@ public final class MosaicEngine: @unchecked Sendable {
     
     public var isCancelled: Bool = false
     public var isPaused: Bool = false
-    public var edgeWeight: Float = 0.0
+    public var edgeWeight: Float = 0.0 {
+        didSet {
+            if edgeWeight != oldValue {
+                planarStore = nil
+            }
+        }
+    }
     public var quadtreeMaxDepth: Int = 3
     public var quadtreeThreshold: Float = 0.15
     public var quadtreeBalanced: Bool = true

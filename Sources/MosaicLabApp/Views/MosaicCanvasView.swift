@@ -483,6 +483,32 @@ private final class NSMosaicView: NSView {
         self.cachedWidth = width
         self.cachedHeight = height
         self.cachedTilesCount = currentTilesCount
+        
+        if !missingThumbnailURLs.isEmpty {
+            let uniqueMissing = Array(Set(missingThumbnailURLs))
+            Task.detached(priority: .utility) { [weak self] in
+                var loadedAny = false
+                for url in uniqueMissing {
+                    if url.scheme == "applephotos",
+                       let comps = URLComponents(url: url, resolvingAgainstBaseURL: false),
+                       let idItem = comps.queryItems?.first(where: { $0.name == "id" })?.value,
+                       let cgImg = try? await ApplePhotosSource.shared.loadDisplayThumbnail(byIdentifier: idItem, maxPixelSize: 256) {
+                        MosaicThumbnailCache.shared.setThumbnail(cgImg, for: url)
+                        loadedAny = true
+                    } else if MosaicThumbnailCache.shared.thumbnail(for: url, maxPixelSize: 256) != nil {
+                        loadedAny = true
+                    }
+                }
+                if loadedAny {
+                    await MainActor.run { [weak self] in
+                        guard let self = self else { return }
+                        self.cachedCanvasVersion = -1
+                        self.needsDisplay = true
+                    }
+                }
+            }
+        }
+        
         return newImage
     }
     
@@ -732,6 +758,32 @@ private final class UIMosaicView: UIView {
         self.cachedWidth = width
         self.cachedHeight = height
         self.cachedTilesCount = currentTilesCount
+        
+        if !missingThumbnailURLs.isEmpty {
+            let uniqueMissing = Array(Set(missingThumbnailURLs))
+            Task.detached(priority: .utility) { [weak self] in
+                var loadedAny = false
+                for url in uniqueMissing {
+                    if url.scheme == "applephotos",
+                       let comps = URLComponents(url: url, resolvingAgainstBaseURL: false),
+                       let idItem = comps.queryItems?.first(where: { $0.name == "id" })?.value,
+                       let cgImg = try? await ApplePhotosSource.shared.loadDisplayThumbnail(byIdentifier: idItem, maxPixelSize: 256) {
+                        MosaicThumbnailCache.shared.setThumbnail(cgImg, for: url)
+                        loadedAny = true
+                    } else if MosaicThumbnailCache.shared.thumbnail(for: url, maxPixelSize: 256) != nil {
+                        loadedAny = true
+                    }
+                }
+                if loadedAny {
+                    await MainActor.run { [weak self] in
+                        guard let self = self else { return }
+                        self.cachedCanvasVersion = -1
+                        self.setNeedsDisplay()
+                    }
+                }
+            }
+        }
+        
         return newImage
     }
     
