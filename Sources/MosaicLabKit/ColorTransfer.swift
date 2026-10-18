@@ -153,22 +153,27 @@ public enum ColorTransfer {
         let colorSpace = CGColorSpaceCreateDeviceRGB()
         let bitmapInfo = CGBitmapInfo.byteOrder32Big.rawValue | CGImageAlphaInfo.premultipliedLast.rawValue
         
-        guard let ctx = CGContext(
-            data: &buffer,
-            width: width,
-            height: height,
-            bitsPerComponent: 8,
-            bytesPerRow: width * 4,
-            space: colorSpace,
-            bitmapInfo: bitmapInfo
-        ) else {
-            return ColorStatistics(meanL: 0.5, meanA: 0, meanB: 0, stdL: 0.1, stdA: 0.1, stdB: 0.1)
+        return buffer.withUnsafeMutableBytes { ptr -> ColorStatistics in
+            guard let baseAddress = ptr.baseAddress?.assumingMemoryBound(to: UInt8.self) else {
+                return ColorStatistics(meanL: 0.5, meanA: 0, meanB: 0, stdL: 0.1, stdA: 0.1, stdB: 0.1)
+            }
+            guard let ctx = CGContext(
+                data: baseAddress,
+                width: width,
+                height: height,
+                bitsPerComponent: 8,
+                bytesPerRow: width * 4,
+                space: colorSpace,
+                bitmapInfo: bitmapInfo
+            ) else {
+                return ColorStatistics(meanL: 0.5, meanA: 0, meanB: 0, stdL: 0.1, stdA: 0.1, stdB: 0.1)
+            }
+            
+            ctx.interpolationQuality = .low
+            ctx.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+            
+            return computeStatistics(fromRGBA: baseAddress, count: totalPixels)
         }
-        
-        ctx.interpolationQuality = .low
-        ctx.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
-        
-        return computeStatistics(fromRGBA: buffer, count: totalPixels)
     }
     
     // MARK: - Color Transfer Execution
@@ -195,73 +200,80 @@ public enum ColorTransfer {
         let colorSpace = CGColorSpaceCreateDeviceRGB()
         let bitmapInfo = CGBitmapInfo.byteOrder32Big.rawValue | CGImageAlphaInfo.premultipliedLast.rawValue
         
-        guard let ctx = CGContext(
-            data: &buffer,
-            width: width,
-            height: height,
-            bitsPerComponent: 8,
-            bytesPerRow: bytesPerRow,
-            space: colorSpace,
-            bitmapInfo: bitmapInfo
-        ) else {
-            return candidate
+        let resultImage: CGImage? = buffer.withUnsafeMutableBytes { ptr in
+            guard let baseAddress = ptr.baseAddress?.assumingMemoryBound(to: UInt8.self) else {
+                return nil
+            }
+            guard let ctx = CGContext(
+                data: baseAddress,
+                width: width,
+                height: height,
+                bitsPerComponent: 8,
+                bytesPerRow: bytesPerRow,
+                space: colorSpace,
+                bitmapInfo: bitmapInfo
+            ) else {
+                return nil
+            }
+            
+            ctx.interpolationQuality = .high
+            ctx.draw(candidate, in: CGRect(x: 0, y: 0, width: width, height: height))
+            
+            // 1. Candidate's own color statistics (cached or computed)
+            let srcStats = sourceStats ?? computeStatistics(fromRGBA: baseAddress, count: totalPixels)
+            
+            // Scale factors: ratio of target variance to source variance
+            let scaleL = targetStats.stdL / srcStats.stdL
+            let scaleA = targetStats.stdA / srcStats.stdA
+            let scaleB = targetStats.stdB / srcStats.stdB
+            
+            let lambda = max(0.0, min(1.0, strength))
+            
+            // Combined linear interpolation coefficients:
+            // final = (1 - lambda) * orig + lambda * ((orig - srcMean) * scale + targetMean)
+            //       = orig * ((1 - lambda) + lambda * scale) + lambda * (targetMean - srcMean * scale)
+            let coeffL = (1.0 - lambda) + lambda * scaleL
+            let biasL  = lambda * (targetStats.meanL - srcStats.meanL * scaleL)
+            
+            let coeffA = (1.0 - lambda) + lambda * scaleA
+            let biasA  = lambda * (targetStats.meanA - srcStats.meanA * scaleA)
+            
+            let coeffB = (1.0 - lambda) + lambda * scaleB
+            let biasB  = lambda * (targetStats.meanB - srcStats.meanB * scaleB)
+            
+            // 2. Transform pixels in OKLab space directly inside pinned memory
+            for i in 0..<totalPixels {
+                let offset = i * 4
+                let rRaw = baseAddress[offset]
+                let gRaw = baseAddress[offset + 1]
+                let bRaw = baseAddress[offset + 2]
+                let aRaw = baseAddress[offset + 3]
+                
+                // Linear RGB via LUT -> OKLab
+                let rLin = srgbToLinearLUT[Int(rRaw)]
+                let gLin = srgbToLinearLUT[Int(gRaw)]
+                let bLin = srgbToLinearLUT[Int(bRaw)]
+                
+                let origLab = rgbToOKLab(r: rLin, g: gLin, b: bLin)
+                
+                // Fast Reinhard FMA transfer
+                let finalL = origLab.l * coeffL + biasL
+                let finalA = origLab.a * coeffA + biasA
+                let finalB = origLab.b * coeffB + biasB
+                
+                // OKLab -> sRGB
+                let (rOut, gOut, bOut) = oklabToRGB(L: finalL, a: finalA, b: finalB)
+                
+                baseAddress[offset]     = UInt8(max(0.0, min(255.0, rOut * 255.0 + 0.5)))
+                baseAddress[offset + 1] = UInt8(max(0.0, min(255.0, gOut * 255.0 + 0.5)))
+                baseAddress[offset + 2] = UInt8(max(0.0, min(255.0, bOut * 255.0 + 0.5)))
+                baseAddress[offset + 3] = aRaw // Preserve original alpha
+            }
+            
+            return ctx.makeImage()
         }
         
-        ctx.interpolationQuality = .high
-        ctx.draw(candidate, in: CGRect(x: 0, y: 0, width: width, height: height))
-        
-        // 1. Candidate's own color statistics (cached or computed)
-        let srcStats = sourceStats ?? computeStatistics(fromRGBA: buffer, count: totalPixels)
-        
-        // Scale factors: ratio of target variance to source variance
-        let scaleL = targetStats.stdL / srcStats.stdL
-        let scaleA = targetStats.stdA / srcStats.stdA
-        let scaleB = targetStats.stdB / srcStats.stdB
-        
-        let lambda = max(0.0, min(1.0, strength))
-        
-        // Combined linear interpolation coefficients:
-        // final = (1 - lambda) * orig + lambda * ((orig - srcMean) * scale + targetMean)
-        //       = orig * ((1 - lambda) + lambda * scale) + lambda * (targetMean - srcMean * scale)
-        let coeffL = (1.0 - lambda) + lambda * scaleL
-        let biasL  = lambda * (targetStats.meanL - srcStats.meanL * scaleL)
-        
-        let coeffA = (1.0 - lambda) + lambda * scaleA
-        let biasA  = lambda * (targetStats.meanA - srcStats.meanA * scaleA)
-        
-        let coeffB = (1.0 - lambda) + lambda * scaleB
-        let biasB  = lambda * (targetStats.meanB - srcStats.meanB * scaleB)
-        
-        // 2. Transform pixels in OKLab space
-        for i in 0..<totalPixels {
-            let offset = i * 4
-            let rRaw = buffer[offset]
-            let gRaw = buffer[offset + 1]
-            let bRaw = buffer[offset + 2]
-            let aRaw = buffer[offset + 3]
-            
-            // Linear RGB via LUT -> OKLab
-            let rLin = srgbToLinearLUT[Int(rRaw)]
-            let gLin = srgbToLinearLUT[Int(gRaw)]
-            let bLin = srgbToLinearLUT[Int(bRaw)]
-            
-            let origLab = rgbToOKLab(r: rLin, g: gLin, b: bLin)
-            
-            // Fast Reinhard FMA transfer
-            let finalL = origLab.l * coeffL + biasL
-            let finalA = origLab.a * coeffA + biasA
-            let finalB = origLab.b * coeffB + biasB
-            
-            // OKLab -> sRGB
-            let (rOut, gOut, bOut) = oklabToRGB(L: finalL, a: finalA, b: finalB)
-            
-            buffer[offset]     = UInt8(max(0.0, min(255.0, rOut * 255.0 + 0.5)))
-            buffer[offset + 1] = UInt8(max(0.0, min(255.0, gOut * 255.0 + 0.5)))
-            buffer[offset + 2] = UInt8(max(0.0, min(255.0, bOut * 255.0 + 0.5)))
-            buffer[offset + 3] = aRaw // Preserve original alpha
-        }
-        
-        return ctx.makeImage() ?? candidate
+        return resultImage ?? candidate
     }
     
     /// Converts a CGImage to pristine Rec. 709 grayscale / monochrome.

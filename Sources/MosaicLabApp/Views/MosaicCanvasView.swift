@@ -418,9 +418,10 @@ private final class NSMosaicView: NSView {
         let strokeLineWidth = (displayScale > 0.0) ? strokeW / displayScale : strokeW
         let displayTarget = isMono ? ColorTransfer.convertToMonochrome(target) : target
         
+        // Always render base target substrate so the canvas context is never transparent
+        drawUprightImage(displayTarget, in: CGRect(origin: .zero, size: mSize), in: ctx)
         let hasUnmatchedTiles = engine.tiles.contains { $0.bestImageURL == nil }
         if hasUnmatchedTiles {
-            drawUprightImage(displayTarget, in: CGRect(origin: .zero, size: mSize), in: ctx)
             ctx.setFillColor(CGColor(red: 0, green: 0, blue: 0, alpha: 0.35))
             ctx.fill(CGRect(origin: .zero, size: mSize))
         }
@@ -667,9 +668,10 @@ private final class UIMosaicView: UIView {
         let strokeLineWidth = (displayScale > 0.0) ? strokeW / displayScale : strokeW
         let displayTarget = isMono ? ColorTransfer.convertToMonochrome(target) : target
         
+        // Always render base target substrate so the canvas context is never transparent
+        drawUprightImage(displayTarget, in: CGRect(origin: .zero, size: mSize), in: ctx)
         let hasUnmatchedTiles = engine.tiles.contains { $0.bestImageURL == nil }
         if hasUnmatchedTiles {
-            drawUprightImage(displayTarget, in: CGRect(origin: .zero, size: mSize), in: ctx)
             ctx.setFillColor(CGColor(red: 0, green: 0, blue: 0, alpha: 0.35))
             ctx.fill(CGRect(origin: .zero, size: mSize))
         }

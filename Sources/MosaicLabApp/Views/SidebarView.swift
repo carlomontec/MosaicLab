@@ -660,18 +660,25 @@ public struct SidebarView: View {
                     .padding(.top, 4)
                 }
                 
-                // Section 5: Memory Safety Badge
+                // Section 5: Memory Safety Badge & Cache Settings
                 HStack {
                     Image(systemName: viewModel.isMemorySafe ? "checkmark.shield.fill" : "exclamationmark.triangle.fill")
                         .foregroundColor(viewModel.isMemorySafe ? .green : .orange)
-                    Text("RAM Footprint: ~\(viewModel.estimatedRAMText)")
+                    Text("RAM: ~\(viewModel.estimatedRAMText)")
                         .font(.caption2)
                         .foregroundColor(.secondary)
                     Spacer()
-                    Text(viewModel.isMemorySafe ? "Safe" : "Caution")
+                    Button(action: {
+                        viewModel.isSettingsPresented = true
+                    }) {
+                        HStack(spacing: 3) {
+                            Image(systemName: "gearshape")
+                            Text("Cache Settings")
+                        }
                         .font(.caption2)
-                        .fontWeight(.semibold)
-                        .foregroundColor(viewModel.isMemorySafe ? .green : .orange)
+                    }
+                    .buttonStyle(.borderless)
+                    .help("Inspect and manage two-tier RAM & Disk cache")
                 }
                 .padding(.horizontal, 4)
             }

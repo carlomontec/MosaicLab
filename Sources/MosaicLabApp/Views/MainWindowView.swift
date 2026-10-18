@@ -221,6 +221,10 @@ public struct MainWindowView: View {
         .sheet(isPresented: $viewModel.isAboutPresented) {
             AboutView()
         }
+        .sheet(isPresented: $viewModel.isSettingsPresented) {
+            SettingsView()
+                .environmentObject(viewModel)
+        }
         .popover(item: $viewModel.selectedTile) { tile in
             TileDetailPopover(tile: tile) {
                 viewModel.selectedTile = nil

@@ -226,6 +226,54 @@ public final class MosaicViewModel: ObservableObject {
     @Published public var estimatedRAMText: String = "0 MB"
     @Published public var isMemorySafe: Bool = true
     
+    // Two-Tier Candidate Cache Statistics
+    @Published public var ramCacheSizeText: String = "0 KB"
+    @Published public var ramCachePhotosCount: Int = 0
+    @Published public var diskCacheSizeText: String = "0 KB"
+    @Published public var diskCachePhotosCount: Int = 0
+    @Published public var isSettingsPresented: Bool = false
+    @Published public var maxDiskBytesLimit: Int = Int(SourceCandidateCache.shared.maxDiskBytes) {
+        didSet {
+            SourceCandidateCache.shared.maxDiskBytes = Int64(maxDiskBytesLimit)
+        }
+    }
+    @Published public var showingClearDiskConfirm: Bool = false
+    @Published public var showingClearRAMConfirm: Bool = false
+    
+    public func updateCacheStatistics() {
+        let ramCount = SourceCandidateCache.shared.ramPhotoCount
+        let ramBytes = SourceCandidateCache.shared.ramSizeBytes
+        let diskCount = SourceCandidateCache.shared.diskPhotoCount
+        let diskBytes = SourceCandidateCache.shared.diskSizeBytes + MosaicThumbnailCache.shared.diskSizeBytes
+        
+        self.ramCachePhotosCount = ramCount
+        self.ramCacheSizeText = ByteCountFormatter.string(fromByteCount: ramBytes, countStyle: .file)
+        self.diskCachePhotosCount = diskCount
+        self.diskCacheSizeText = ByteCountFormatter.string(fromByteCount: diskBytes, countStyle: .file)
+    }
+    
+    public func clearRAMCache() {
+        SourceCandidateCache.shared.clearRAM()
+        MosaicThumbnailCache.shared.clear()
+        updateCacheStatistics()
+        statusMessage = "RAM cache cleared."
+    }
+    
+    public func clearDiskCache() {
+        SourceCandidateCache.shared.clearDisk()
+        MosaicThumbnailCache.shared.clearDisk()
+        updateCacheStatistics()
+        statusMessage = "Disk cache purged."
+    }
+    
+    public func clearAllCaches() {
+        SourceCandidateCache.shared.clearAll()
+        MosaicThumbnailCache.shared.clear()
+        MosaicThumbnailCache.shared.clearDisk()
+        updateCacheStatistics()
+        statusMessage = "All caches cleared."
+    }
+    
     // Canvas interaction state
     @Published public var zoomScale: CGFloat = 1.0
     @Published public var panOffset: CGSize = .zero
@@ -267,6 +315,7 @@ public final class MosaicViewModel: ObservableObject {
         if self.photosAuthStatus == .authorized || self.photosAuthStatus == .limited {
             self.availableAlbums = ApplePhotosSource.shared.fetchAvailableAlbums()
         }
+        updateCacheStatistics()
     }
     
     public var canStart: Bool {
@@ -634,10 +683,12 @@ public final class MosaicViewModel: ObservableObject {
             let total = items.count
             var count = 0
             let loader = ImageLoader()
-            let batchSize = max(64, ProcessInfo.processInfo.activeProcessorCount * 8)
+            let chunkSize = max(64, min(128, ProcessInfo.processInfo.activeProcessorCount * 8))
             var lastUIUpdateTime = ContinuousClock.now
             var lastCanvasUpdateTime = ContinuousClock.now
             var hadUpdatesSinceLastCanvasRefresh = false
+            var totalCacheHits = 0
+            var totalCacheMisses = 0
             
             var index = 0
             while index < total {
@@ -649,39 +700,100 @@ public final class MosaicViewModel: ObservableObject {
                 }
                 if Task.isCancelled { break }
                 
-                let endIndex = min(index + batchSize, total)
+                let endIndex = min(index + chunkSize, total)
                 let currentChunk = Array(items[index..<endIndex])
                 index = endIndex
+                
+                // 1. Gather metadata concurrently for all items in the chunk
+                struct CandidateMeta {
+                    let item: MosaicCandidateItem
+                    let modTime: TimeInterval
+                    let fileSize: Int64
+                }
+                
+                let currentChunkMeta: [CandidateMeta] = await withTaskGroup(of: CandidateMeta.self) { group in
+                    for item in currentChunk {
+                        group.addTask {
+                            let modTime: TimeInterval
+                            let fileSize: Int64
+                            if let url = item.originalURL {
+                                let values = try? url.resourceValues(forKeys: [.contentModificationDateKey, .fileSizeKey])
+                                modTime = values?.contentModificationDate?.timeIntervalSince1970 ?? 0
+                                fileSize = Int64(values?.fileSize ?? 0)
+                            } else {
+                                modTime = 0
+                                fileSize = 0
+                            }
+                            return CandidateMeta(item: item, modTime: modTime, fileSize: fileSize)
+                        }
+                    }
+                    var metas: [CandidateMeta] = []
+                    metas.reserveCapacity(currentChunk.count)
+                    for await meta in group {
+                        metas.append(meta)
+                    }
+                    return metas
+                }
+                
+                // 2. Query SourceCandidateCache in a single batch call upfront
+                let batchQuery = currentChunkMeta.map { (id: $0.item.id, modTime: $0.modTime, fileSize: $0.fileSize) }
+                let cachedHits = SourceCandidateCache.shared.getBatch(items: batchQuery)
                 
                 var chunkCandidates: [SourceImageCandidate] = []
                 chunkCandidates.reserveCapacity(currentChunk.count)
                 
-                await withTaskGroup(of: SourceImageCandidate?.self) { group in
-                    for item in currentChunk {
-                        group.addTask {
-                            if Task.isCancelled { return nil }
-                            
-                            let thumbData: Data?
-                            if item.sourceProviderID == "apple-photos" {
-                                thumbData = try? await ApplePhotosSource.shared.loadCandidateThumbnail(for: item)
-                            } else if let url = item.originalURL {
-                                thumbData = loader.loadThumbnail(from: url, targetSize: 16)
-                            } else {
-                                thumbData = nil
+                var misses: [CandidateMeta] = []
+                for meta in currentChunkMeta {
+                    if let cached = cachedHits[meta.item.id] {
+                        chunkCandidates.append(cached)
+                    } else {
+                        misses.append(meta)
+                    }
+                }
+                
+                totalCacheHits += cachedHits.count
+                totalCacheMisses += misses.count
+                
+                // 3. Decode only cache misses in parallel
+                if !misses.isEmpty {
+                    var newlyDecoded: [(candidate: SourceImageCandidate, modTime: TimeInterval, fileSize: Int64)] = []
+                    newlyDecoded.reserveCapacity(misses.count)
+                    
+                    await withTaskGroup(of: (SourceImageCandidate, TimeInterval, Int64)?.self) { group in
+                        for miss in misses {
+                            group.addTask {
+                                if Task.isCancelled { return nil }
+                                
+                                let item = miss.item
+                                let thumbData: Data?
+                                if item.sourceProviderID == "apple-photos" {
+                                    thumbData = try? await ApplePhotosSource.shared.loadCandidateThumbnail(for: item)
+                                } else if let url = item.originalURL {
+                                    thumbData = loader.loadThumbnail(from: url, targetSize: 16)
+                                } else {
+                                    thumbData = nil
+                                }
+                                
+                                guard let data = thumbData else { return nil }
+                                let cand = SourceImageCandidate(
+                                    identifier: item.id,
+                                    url: item.canonicalURL,
+                                    thumbnailPixels: data
+                                )
+                                return (cand, miss.modTime, miss.fileSize)
                             }
-                            
-                            guard let data = thumbData else { return nil }
-                            return SourceImageCandidate(
-                                identifier: item.id,
-                                url: item.canonicalURL,
-                                thumbnailPixels: data
-                            )
+                        }
+                        for await result in group {
+                            if let result = result {
+                                newlyDecoded.append(result)
+                                chunkCandidates.append(result.0)
+                            }
                         }
                     }
-                    for await cand in group {
-                        if let cand = cand {
-                            chunkCandidates.append(cand)
-                        }
+                    
+                    // 4. Batch insert misses into two-tier cache in a single transaction
+                    if !newlyDecoded.isEmpty && !Task.isCancelled {
+                        SourceCandidateCache.shared.putBatch(newlyDecoded)
                     }
                 }
                 
@@ -719,7 +831,8 @@ public final class MosaicViewModel: ObservableObject {
                         avgScore = 1.0
                     }
                     let pct = Int(Double(currentCount) / Double(total) * 100.0)
-                    let status = "Matching: \(currentCount)/\(total) photos (\(pct)%) | \(matched)/\(engine.tiles.count) tiles"
+                    let hitRate = (totalCacheHits + totalCacheMisses > 0) ? Int(Double(totalCacheHits) / Double(totalCacheHits + totalCacheMisses) * 100.0) : 0
+                    let status = "Matching: \(currentCount)/\(total) (\(pct)%) [Cache: \(totalCacheHits) hits, \(hitRate)%] | \(matched)/\(engine.tiles.count) tiles"
                     
                     await MainActor.run { [weak self] in
                         guard let self = self else { return }
@@ -738,11 +851,16 @@ public final class MosaicViewModel: ObservableObject {
             
             let finalMatched = engine.tiles.filter { $0.bestImageURL != nil }.count
             let finalTotal = engine.tiles.count
+            let finalHits = totalCacheHits
+            let finalMisses = totalCacheMisses
+            let hitRate = (finalHits + finalMisses > 0) ? Int(Double(finalHits) / Double(finalHits + finalMisses) * 100.0) : 0
+            
             await MainActor.run { [weak self] in
                 guard let self = self else { return }
                 self.isRunning = false
-                self.statusMessage = "Completed! Filled \(finalMatched) of \(finalTotal) tiles."
+                self.statusMessage = "Completed! Filled \(finalMatched)/\(finalTotal) tiles (Cache: \(finalHits) hits, \(finalMisses) misses, \(hitRate)% hit rate)."
                 self.canvasVersion += 1
+                self.updateCacheStatistics()
                 self.sendCompletionNotification(matched: finalMatched, total: finalTotal)
             }
         }

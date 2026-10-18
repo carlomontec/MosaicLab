@@ -324,8 +324,11 @@ public final class MosaicEngine: @unchecked Sendable {
         }
         
         if anyUpdated && !winnerURLs.isEmpty {
-            for url in winnerURLs {
-                MosaicThumbnailCache.shared.preheatThumbnail(for: url, maxPixelSize: 256)
+            let urlsToPreheat = Array(winnerURLs)
+            Task.detached(priority: .utility) {
+                for url in urlsToPreheat {
+                    MosaicThumbnailCache.shared.preheatThumbnail(for: url, maxPixelSize: 256)
+                }
             }
         }
         

@@ -145,6 +145,11 @@ struct MosaicLabApp: App {
                 .disabled(viewModel.isRunning || viewModel.engine == nil)
             }
         }
+        
+        Settings {
+            SettingsView()
+                .environmentObject(viewModel)
+        }
         #else
         WindowGroup {
             MainWindowView()

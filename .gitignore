@@ -18,3 +18,4 @@ test/*.jpg
 test/*.heic
 *.zip
 !docs/*.png
+scratch/

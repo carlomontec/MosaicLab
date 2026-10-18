@@ -70,32 +70,38 @@ private final class IntegralImage {
         var rgbData = [UInt8](repeating: 0, count: w * h * 4)
         
         let graySpace = CGColorSpaceCreateDeviceGray()
-        if let grayCtx = CGContext(
-            data: &grayBuffer,
-            width: w,
-            height: h,
-            bitsPerComponent: 8,
-            bytesPerRow: w,
-            space: graySpace,
-            bitmapInfo: CGImageAlphaInfo.none.rawValue
-        ) {
-            grayCtx.interpolationQuality = .low
-            grayCtx.draw(image, in: CGRect(x: 0, y: 0, width: w, height: h))
+        grayBuffer.withUnsafeMutableBytes { ptr in
+            guard let baseAddress = ptr.baseAddress else { return }
+            if let grayCtx = CGContext(
+                data: baseAddress,
+                width: w,
+                height: h,
+                bitsPerComponent: 8,
+                bytesPerRow: w,
+                space: graySpace,
+                bitmapInfo: CGImageAlphaInfo.none.rawValue
+            ) {
+                grayCtx.interpolationQuality = .low
+                grayCtx.draw(image, in: CGRect(x: 0, y: 0, width: w, height: h))
+            }
         }
         
         let rgbSpace = CGColorSpaceCreateDeviceRGB()
         let rgbBitmapInfo = CGImageAlphaInfo.premultipliedLast.rawValue | CGBitmapInfo.byteOrder32Big.rawValue
-        if let rgbCtx = CGContext(
-            data: &rgbData,
-            width: w,
-            height: h,
-            bitsPerComponent: 8,
-            bytesPerRow: w * 4,
-            space: rgbSpace,
-            bitmapInfo: rgbBitmapInfo
-        ) {
-            rgbCtx.interpolationQuality = .low
-            rgbCtx.draw(image, in: CGRect(x: 0, y: 0, width: w, height: h))
+        rgbData.withUnsafeMutableBytes { ptr in
+            guard let baseAddress = ptr.baseAddress else { return }
+            if let rgbCtx = CGContext(
+                data: baseAddress,
+                width: w,
+                height: h,
+                bitsPerComponent: 8,
+                bytesPerRow: w * 4,
+                space: rgbSpace,
+                bitmapInfo: rgbBitmapInfo
+            ) {
+                rgbCtx.interpolationQuality = .low
+                rgbCtx.draw(image, in: CGRect(x: 0, y: 0, width: w, height: h))
+            }
         }
         self.rgbBuffer = rgbData
         
